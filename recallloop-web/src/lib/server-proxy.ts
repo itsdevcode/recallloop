@@ -14,12 +14,14 @@ export async function proxyApi(request: NextRequest, path: string) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  // Render hostport references contain no scheme; the value stays server-only.
+  // Render hostport references contain no scheme; public URLs use https.
   const configured = process.env.API_INTERNAL_URL;
   const upstream = configured
     ? configured.includes("://")
       ? configured
-      : `http://${configured}`
+      : configured.includes(".onrender.com")
+        ? `https://${configured}`
+        : `http://${configured}`
     : "http://127.0.0.1:8000";
   try {
     const response = await fetch(new URL(path, upstream), {
@@ -28,7 +30,7 @@ export async function proxyApi(request: NextRequest, path: string) {
       body: request.method === "POST" ? await request.text() : undefined,
       cache: "no-store",
       redirect: "error",
-      signal: AbortSignal.timeout(30000),
+      signal: AbortSignal.timeout(60000),
     });
     const outgoing = new Headers({ "Cache-Control": "no-store" });
     const contentType = response.headers.get("content-type");
