@@ -189,3 +189,4 @@ Render will detect variables marked `sync: false` and prompt for them:
    * Verify both Uvicorn and Celery launch successfully.
 4. Open `https://recallloop-web.onrender.com` in your browser.
 5. Test creating an account, logging in, and saving an article to verify end-to-end active recall processing.
+
