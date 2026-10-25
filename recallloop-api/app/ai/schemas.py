@@ -16,8 +16,8 @@ class GeneratedConcept(BaseModel):
     title: str = Field(min_length=3, max_length=255)
     explanation: str = Field(min_length=20, max_length=2000)
     source_excerpt: str = Field(min_length=20, max_length=600)
-    question: str = Field(min_length=15, max_length=500)
-    answer: str = Field(min_length=20, max_length=2000)
+    question: str = Field(min_length=10, max_length=500)
+    answer: str = Field(min_length=5, max_length=2000)
 
 
 class GeneratedLearning(BaseModel):
