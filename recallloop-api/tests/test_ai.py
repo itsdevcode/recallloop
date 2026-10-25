@@ -9,7 +9,16 @@ from google.genai import errors
 from pydantic import ValidationError
 
 from app.ai import gemma
-from app.ai.gemma import AIError, TransientAIError
+from app.ai.gemma import (
+    AIError,
+    EvidenceMatchingError,
+    JSONFormattingError,
+    OutputLimitError,
+    ProviderConfigurationError,
+    SchemaValidationError,
+    TransientAIError,
+    extract_json_payload,
+)
 from app.ai.prompts import INPUT_CHAR_BUDGET, SYSTEM_INSTRUCTION, select_input
 from app.ai.schemas import GeneratedLearning
 from app.core.config import Settings
@@ -137,6 +146,58 @@ async def test_empty_content_never_invokes_provider(monkeypatch):
 @pytest.mark.asyncio
 async def test_single_call_smoke_mode_does_not_repair(monkeypatch):
     _, generate = mock_sdk(monkeypatch, [SimpleNamespace(text="not json")])
-    with pytest.raises(AIError):
+    with pytest.raises(JSONFormattingError):
         await gemma.generate_learning(TEXT, settings(), max_repairs=0)
     assert generate.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_markdown_fenced_json_succeeds_single_call(monkeypatch):
+    fenced_output = f"```json\n{json.dumps(LEARNING_JSON)}\n```"
+    _, generate = mock_sdk(monkeypatch, [SimpleNamespace(text=fenced_output)])
+    result = await gemma.generate_learning(TEXT, settings(), max_repairs=0)
+    assert len(result.learning.concepts) == 3
+    assert generate.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected_key"),
+    [
+        (f"```json\n{json.dumps({'concepts': []})}\n```", "concepts"),
+        (f"```JSON\n{json.dumps({'concepts': []})}\n```", "concepts"),
+        (f"```\n{json.dumps({'concepts': []})}\n```", "concepts"),
+        (f"Here is the result:\n```json\n{json.dumps({'concepts': []})}\n```\nDone", "concepts"),
+        (f"```json\n{json.dumps({'concepts': [{'info': '```nested'}]})}\n```", "concepts"),
+        (f"Prefix text: {json.dumps({'concepts': []})} Suffix text", "concepts"),
+    ],
+)
+def test_extract_json_payload_formats(raw, expected_key):
+    extracted = extract_json_payload(raw)
+    parsed = json.loads(extracted)
+    assert expected_key in parsed
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_categories_for_failures(monkeypatch):
+    # Output limit error
+    mock_sdk(monkeypatch, [SimpleNamespace(text="x" * 40001)])
+    with pytest.raises(OutputLimitError):
+        await gemma.generate_learning(TEXT, settings(), max_repairs=0)
+
+    # Schema validation error
+    mock_sdk(monkeypatch, [SimpleNamespace(text='{"wrong_schema": true}')])
+    with pytest.raises(SchemaValidationError):
+        await gemma.generate_learning(TEXT, settings(), max_repairs=0)
+
+    # Evidence matching error
+    hallucinated = copy.deepcopy(LEARNING_JSON)
+    hallucinated["concepts"][0]["source_excerpt"] = "Completely fabricated text not in article."
+    mock_sdk(monkeypatch, [SimpleNamespace(text=json.dumps(hallucinated))])
+    with pytest.raises(EvidenceMatchingError):
+        await gemma.generate_learning(TEXT, settings(), max_repairs=0)
+
+    # Provider configuration error on missing key
+    unconfigured_settings = Settings(_env_file=None, gemini_api_key=None)
+    with pytest.raises(ProviderConfigurationError):
+        await gemma.generate_learning(TEXT, unconfigured_settings, max_repairs=0)
+
