@@ -70,15 +70,23 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               RecallLoop
             </Link>
             <nav
-              className="flex items-center gap-5 text-sm"
+              className="flex w-full flex-wrap items-center gap-4 text-sm sm:w-auto"
               aria-label="Dashboard"
             >
-              <Link
-                href="/dashboard/articles"
-                className="underline underline-offset-4"
-              >
-                Article library
-              </Link>
+              {[
+                ["/dashboard", "Home"],
+                ["/dashboard/articles", "My Library"],
+                ["/dashboard/review", "Today's Recall"],
+                ["/dashboard/schedule", "Review Schedule"],
+              ].map(([href, label]) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="underline underline-offset-4"
+                >
+                  {label}
+                </Link>
+              ))}
               <Button onClick={logout} disabled={busy}>
                 {busy ? "Logging out…" : "Log out"}
               </Button>

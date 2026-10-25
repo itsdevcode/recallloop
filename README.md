@@ -2,8 +2,8 @@
 
 **Save it. Learn it. Remember it.**
 
-RecallLoop is an open-source learning companion that aims to turn saved articles
-into personalized recall cards and schedule reviews with spaced repetition.
+RecallLoop is an open-source learning companion that turns saved articles into
+recall cards and schedules focused reviews with a deterministic spaced-repetition policy.
 Bookmarks collect information; RecallLoop will help people remember it.
 
 ## Implemented and planned
@@ -20,13 +20,15 @@ Implemented:
 - Bounded, SSRF-protected public HTML fetching and Trafilatura extraction in Celery.
 - Hosted Gemma concepts and recall questions/answers with source evidence and validation.
 - PostgreSQL job leases, bounded retries, per-user quotas, and recovery after queue loss.
-- Dashboard quick-add, saved count, and recent articles. Get Started links to registration.
+- Dashboard quick-add, saved count, recent articles, and Today's Recall progress.
+- Question-first recall sessions, Forgot/Hard/Easy ratings, review history, and a UTC schedule.
+  Get Started links to registration.
 - Async SQLAlchemy sessions, Alembic migration, configurable settings and CORS.
 - Backend security/integration tests and real-browser auth/library tests.
 
-Planned PR #5 features include recall ratings (Forgot, Hard, Easy), daily reviews,
-and spaced repetition. These planned features, social login, email verification, password recovery, refresh tokens, and cloud
-resources are not implemented in this PR.
+UI polish and deployment are the next phases. Social login, email verification,
+password recovery, refresh tokens, reminders, and cloud resource provisioning
+are not implemented by this PR.
 
 ## Stack and structure
 
@@ -41,15 +43,15 @@ recallloop-api/
   app/
     main.py                 # Factory, lifespan, safe validation errors
     api/v1/endpoints/       # Auth and article routes
-    core/                   # Settings, hashing and JWT helpers
+    core/                   # Settings, security and pure spaced-repetition policy
     db/                     # Shared Base and async sessions
     models/                 # User and Article typed models
     schemas/                # Validated auth/article inputs and safe public responses
-    services/               # Auth, articles, queue publishing, and leased processing
+    services/               # Auth, articles, processing, and atomic review submissions
     ai/                     # Gemma SDK client, prompts, and validated output
     workers/                # Celery tasks and automatic/manual reconciliation
     dependencies/auth.py    # Cookie authentication and CSRF checks
-  alembic/                  # Registered metadata; 0001 users, 0002 articles, 0003 learning/jobs
+  alembic/                  # Registered metadata; 0001 users, 0002 articles, 0003 learning/jobs, 0004 reviews
   tests/                    # Health, configuration and PostgreSQL integration
   pyproject.toml
   uv.lock
@@ -273,12 +275,12 @@ poll every three seconds while jobs are active, stop on READY/FAILED, and pause 
 100 polling requests until manually refreshed. Hidden tabs do not poll; leaving a
 page cancels its polling timer. Failed entries offer Retry processing while attempts
 remain. New detail pages show the concepts, supporting passages, questions, and
-reveal-answer controls; daily review scheduling is explicitly reserved for PR #5.
+reveal-answer controls; review scheduling is available from Today's Recall.
 
 The worker claims a 180-second, randomly fenced lease in a short transaction. It then
 closes the session, securely extracts content, saves that content in another short
-transaction, invokes Gemma outside any database transaction, and atomically replaces
-concepts/cards and marks READY. If AI fails, extracted content remains available and
+transaction, invokes Gemma outside any database transaction, and atomically stores
+learning material and marks READY. If AI fails, extracted content remains available and
 later attempts reuse it. Duplicate deliveries cannot claim a live lease; an expired
 worker cannot write after another worker takes its lease. Deleting an article during
 processing prevents a later worker from recreating it.
@@ -361,7 +363,7 @@ instances. By default ten create/manual-retry submissions are permitted per 24-h
 and resets on the first submission after it expires; it is not a sliding event log. The counter survives article deletion, so deleting/re-saving cannot
 bypass it. Automatic retries do not consume new submission slots but remain capped
 by the article attempt count. Failed queue publications consume a slot conservatively.
-There is no cross-user billing or review scheduling in this implementation.
+Processing quotas do not change review eligibility or scheduling.
 
 ### Local broker and worker
 
@@ -385,7 +387,8 @@ uv run celery -A app.workers.celery_app:celery_app worker --loglevel=info --conc
 Keep the API, web app and worker running. Migration `0003` adds `concepts`,
 `recall_cards`, per-user budgets, article attempts/leases/recovery timestamps, and
 model/coverage fields. Article deletion cascades through concepts to cards. Concept
-positions are unique per article, and successful results are replaced atomically.
+positions are unique per article, and unreviewed results are replaced atomically.
+Reviewed cards are preserved by the scheduling safeguards described below.
 No authentication columns change. Existing PR #3 READY articles are moved to PENDING
 while retaining their extracted text; reconciliation queues their AI generation.
 Downgrading to `0002` removes learning/job tables and restores extraction-era status
@@ -412,8 +415,145 @@ This is a conservative bounded HTML reader, not a browser: JavaScript-only pages
 paywalls, PDFs, large/compressed pages, and blocked sites may fail. Respect site
 terms and access restrictions. A per-process concurrency bound is not distributed
 abuse protection; deployment-level request controls and outbound network restrictions
-remain useful defense in depth. There is no JavaScript browser extraction, distributed inference scheduling, or
-spaced-repetition algorithm in this PR.
+remain useful defense in depth. Browser-rendered extraction remains outside the current scope.
+
+## Active recall and spaced repetition
+
+From the dashboard, **Today's Recall** shows cards due now and review events
+completed today (UTC). Start Recall opens `/dashboard/review` with up to 50 due
+cards in a fixed batch. Questions appear one at a time; answers are absent from
+the question API payload and fetched only when you choose **Show Answer**. Revealing
+an answer does not change its schedule or create history.
+
+After revealing, choose **Forgot**, **Hard**, or **Easy**. The server atomically
+updates the schedule and records a successful review; the UI confirms the actual
+next-review time, hides the next answer, advances the card and updates progress.
+There is no artificial wait. If an acknowledgment is lost, Retry saving review
+uses the same idempotency key, so an accepted review cannot be counted twice.
+Conflicts from another tab/deletion ask you to reload the due queue rather than
+silently marking an unreviewed card complete.
+
+The completion screen summarizes the successfully reviewed batch and all three
+ratings. It checks the server for additional due cards before claiming you're
+caught up; more cards can be reviewed in another batch. A Forgot card can become
+due again after ten minutes, even during a long session. Session presentation is
+browser-local: reloading starts a new batch, while successful reviews remain in
+PostgreSQL history. There are no server-side session records or streak claims.
+
+`/dashboard/schedule` shows overdue cards, cards already due today, upcoming UTC
+date groups, and paginated review history. Exact timestamps display in the browser's
+local timezone. The navigation includes Home, My Library, Today's Recall, and
+Review Schedule; authentication and article management use their existing flows.
+
+### Deterministic scheduling policy
+
+**Gemma generates article concepts/questions/answers; it does not calculate review
+intervals.** The pure Python function in `app/core/spaced_repetition.py` implements
+an explicit MVP policy, not FSRS or SM-2. State uses integer days/counts and exact
+Decimal ease factors, persisted as PostgreSQL `NUMERIC(3,2)`.
+
+| Rating | Repetition count | Ease factor | Next review |
+| --- | --- | --- | --- |
+| New card | 0 | 2.50 | Immediately at its UTC creation timestamp |
+| Forgot | Reset to 0 | Decrease 0.20, minimum 1.30 | Server review time + 10 minutes; interval_days = 0 |
+| Hard | Increase by 1 | Decrease 0.15, minimum 1.30 | First review: 1 day; otherwise previous interval × 1.2, minimum 1 day |
+| Easy | Increase by 1 | Increase 0.10, maximum 3.00 | First success or first success after Forgot: 3 days; otherwise previous interval × updated ease |
+
+Fractional day results round to the nearest integer with **decimal half up** (7.5
+becomes 8). Hard can remain at one day after rounding. Intervals are capped at
+36,500 days to bound growth. Review count increases for every accepted rating;
+repetition count measures the current uninterrupted successful sequence. All
+calculations use a server-provided aware UTC time. Day intervals mean 24-hour
+periods, not local daylight-saving calendar arithmetic.
+
+`next_review_at` is authoritative for eligibility. In particular, Forgot's zero
+integer interval does not mean immediately due: its exact timestamp retains ten
+minutes and microsecond precision. No failed/rejected submission changes scheduling.
+
+### Review API
+
+All routes require cookie authentication. POST also requires the existing Origin
+and CSRF headers plus a UUID **`Idempotency-Key`** header. Browser requests use the
+allowlisted same-origin `/api/reviews/...` proxy, which preserves that header.
+Neither a user ID nor a client review time is accepted in the request body.
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /api/v1/reviews/due?limit=50` | Up to 50 questions/metadata, stable next-review timestamp then card-ID ordering, total_due, server as_of; no answers |
+| `GET /api/v1/reviews/cards/{id}/answer` | Owner's answer, no writes; `Cache-Control: no-store` |
+| `POST /api/v1/reviews/cards/{id}` | JSON `{"rating":"EASY"}`; atomically schedules a due card and inserts its audit log |
+| `GET /api/v1/reviews/schedule` | Overdue, due_today, and seven UTC future-card date buckets |
+| `GET /api/v1/reviews/history?limit=20&offset=0` | Newest-first owned review activity; limit 1–100, total count |
+| `GET /api/v1/reviews/stats` | Eligible card count, due_now, reviewed_today, retained completed reviews, upcoming count and earliest future review |
+
+Review eligibility requires the owner chain Card → Concept → Article → User and
+a READY article. Missing/foreign cards return 404; a card not currently due returns
+409; invalid ratings or missing/malformed idempotency keys return 422; CSRF failures
+return 403. All private review responses are `no-store`. Successful POST responses
+include the log ID, rating, review/next-review times, interval and review counters.
+
+Submissions lock user → article → card consistently, serializing concurrent keys
+for one user and excluding worker replacement/article deletion. A unique database
+constraint also enforces one log per user/idempotency key. Repeating the same key,
+card and rating returns the **original response snapshot**, even after later
+reviews or when Forgot becomes due again; reusing it for another card/rating returns
+409. Frontend retries preserve both key and rating and disable competing submissions.
+A new intentional review needs a new key. Keys survive as long as their review logs.
+
+For an authenticated local cookie jar, a manual review submission looks like:
+
+```bash
+curl -b /tmp/recallloop-cookies \
+  -X POST http://localhost:8000/api/v1/reviews/cards/YOUR_CARD_UUID \
+  -H 'Origin: http://localhost:3000' -H 'X-CSRF-Protection: 1' \
+  -H 'Content-Type: application/json' \
+  -H 'Idempotency-Key: YOUR_NEW_REQUEST_UUID' \
+  --data '{"rating":"EASY"}'
+```
+
+### UTC counts and history semantics
+
+- Due now means `next_review_at <= as_of`, including overdue cards.
+- Schedule `overdue` means before today's UTC midnight; `due_today` means today
+  midnight through `as_of`, excluding cards still in the future.
+- `upcoming` and `upcoming_next_7_days` count only future timestamps in the seven
+  UTC calendar dates **including today**: the remainder of today plus six more
+  dates, ending at the seventh following UTC midnight. This is not a rolling
+  168-hour window. Empty date groups are returned with zero counts.
+- Reviewed today counts successful review **events** between UTC midnights. The
+  same card reviewed twice after Forgot contributes two events; HTTP replays do not.
+- Due/stats/schedule each use a single SQL statement for a consistent count snapshot.
+  Eligible card counts refer to READY articles; history refers to retained owned
+  review logs. User-requested article deletion cascades through cards and logs,
+  so deleted content's reviews disappear from these counts/history.
+- Date-group labels explicitly remain UTC; exact review times use the browser's
+  local timezone. No guessed tomorrow messages or untested streak calculations.
+
+### Migration 0004 and card-generation safety
+
+Migration `0004` adds non-null next-review time, interval, repetition/ease/review
+counts and nullable last-reviewed time. Existing cards are backfilled from
+`created_at`; question/answer text and IDs are preserved. Database checks enforce
+nonnegative counts/intervals, repetition ≤ reviews, interval bounds, and ease 1.30–3.00.
+New Gemma-generated cards receive the same due-now defaults at insertion.
+
+`review_logs` stores rating, prior/new interval, review/next times, user/card foreign
+keys, idempotency UUID, and immutable response counters. Appropriate due/history
+indexes and article → concept → card → review-log cascades are included. Card
+updates and log insertion commit in one transaction; a log constraint failure rolls
+back the schedule too.
+
+Normal READY jobs remain idempotent. Unreviewed material may be atomically replaced
+by a legitimate processing retry, as before. Once **any** card on an article has
+been reviewed, worker claim/finalization guards keep all its cards, schedules, IDs,
+and history instead of regenerating them. The shared article lock closes the
+review/regeneration race, and the existing long-input coverage note is retained.
+No Gemma prompt or extraction security rules are changed.
+
+Downgrading to `0003` preserves generated question/answer material but deliberately
+removes schedules and review logs. It is a destructive rollback of learning progress:
+use a disposable database or a deliberate backup/rollback plan. Tests verify the
+backfill and round trip without touching development/production databases.
 
 ## Migrations and tests
 

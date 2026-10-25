@@ -44,7 +44,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         response = await call_next(request)
-        if request.url.path.startswith(("/api/v1/auth/", "/api/v1/articles")):
+        if request.url.path.startswith(("/api/v1/auth/", "/api/v1/articles", "/api/v1/reviews")):
             response.headers["Cache-Control"] = "no-store"
         return response
 
@@ -53,7 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "X-CSRF-Protection"],
+        allow_headers=["Content-Type", "X-CSRF-Protection", "Idempotency-Key"],
     )
     app.include_router(router, prefix="/api/v1")
     return app
