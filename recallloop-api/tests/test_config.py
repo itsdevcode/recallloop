@@ -43,3 +43,36 @@ def test_production_rejects_insecure_configuration() -> None:
         Settings(_env_file=None, jwt_algorithm="HS384")
     with pytest.raises(ValidationError):
         Settings(_env_file=None, cors_origins=["*"])
+
+
+def test_render_database_url_and_pool_limits() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    settings = Settings(_env_file=None, database_url="postgresql://user:pass@db:5432/app")
+    assert settings.async_database_url == "postgresql+asyncpg://user:pass@db:5432/app"
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, db_pool_size=0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, app_env="prodution")
+
+
+def test_production_requires_database_and_matching_https_cors() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    values = dict(
+        _env_file=None,
+        app_env="production",
+        jwt_secret_key="x" * 48,
+        auth_cookie_secure=True,
+        frontend_origin="https://app.example.com",
+        cors_origins=["https://app.example.com"],
+    )
+    with pytest.raises(ValidationError):
+        Settings(**values, database_url=None)
+    values["database_url"] = "postgresql://user:pass@db/app"
+    assert Settings(**values).app_env == "production"
+    values["cors_origins"] = ["http://localhost:3000"]
+    with pytest.raises(ValidationError):
+        Settings(**values)

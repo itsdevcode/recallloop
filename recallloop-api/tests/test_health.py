@@ -29,3 +29,25 @@ def test_cors(origin: str, allowed: bool) -> None:
         )
     assert (response.headers.get("access-control-allow-origin") == origin) is allowed
     assert response.status_code == (200 if allowed else 400)
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [None, "postgresql+asyncpg://user:secret@127.0.0.1:1/unavailable"],
+)
+def test_readiness_failure_is_safe_and_liveness_independent(database_url: str | None) -> None:
+    settings = Settings(_env_file=None, database_url=database_url)
+    with TestClient(create_app(settings)) as client:
+        response = client.get("/api/v1/ready")
+        assert response.status_code == 503
+        assert response.json() == {"status": "unavailable"}
+        assert response.headers["cache-control"] == "no-store"
+        assert client.get("/api/v1/health").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_readiness_with_postgresql(client) -> None:
+    http, _ = client
+    response = await http.get("/api/v1/ready")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ready"}

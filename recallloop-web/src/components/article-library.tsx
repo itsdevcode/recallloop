@@ -172,6 +172,9 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
       className="mt-8"
       aria-label={recent ? "Recent articles" : "Article library"}
     >
+      <h2 className="eyebrow mb-4">
+        {recent ? "Quick Save Article" : "Keep your next good read"}
+      </h2>
       <form
         onSubmit={add}
         className="rounded-2xl border border-forest/15 bg-sage/30 p-5 sm:p-6"
@@ -242,7 +245,7 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
         <span className="font-normal text-muted">({total})</span>
       </h2>
       {loading && (
-        <p role="status" className="mt-5 text-muted">
+        <p role="status" className="skeleton mt-5 p-6 text-muted">
           Loading articles…
         </p>
       )}

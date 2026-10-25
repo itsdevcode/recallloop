@@ -20,7 +20,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     app_name: str = "RecallLoop API"
-    app_env: str = "development"
+    app_env: Literal["development", "test", "production"] = "development"
+    db_pool_size: int = Field(default=5, ge=1, le=20)
+    db_max_overflow: int = Field(default=5, ge=0, le=20)
     # Optional for liveness checks; required when using sessions or migrations.
     database_url: PostgresDsn | None = None
     cors_origins: Annotated[list[str], NoDecode, BeforeValidator(parse_origins)] = [
@@ -64,6 +66,12 @@ class Settings(BaseSettings):
                 raise ValueError("Production requires secure cookies and an HTTPS frontend origin")
             if self.jwt_secret_key is None:
                 raise ValueError("Production requires JWT_SECRET_KEY")
+            if self.database_url is None:
+                raise ValueError("Production requires DATABASE_URL")
+            if self.frontend_origin not in self.cors_origins or any(
+                not value.startswith("https://") for value in self.cors_origins
+            ):
+                raise ValueError("Production CORS must include the HTTPS frontend origin")
         return self
 
     @property
@@ -77,8 +85,11 @@ class Settings(BaseSettings):
         if self.database_url is None:
             raise ValueError("DATABASE_URL is required for database operations")
         url = str(self.database_url)
+        # Render emits a standard PostgreSQL URL; always use our async driver.
+        if url.startswith(("postgresql://", "postgres://")):
+            url = "postgresql+asyncpg://" + url.split("://", 1)[1]
         if not url.startswith("postgresql+asyncpg://"):
-            raise ValueError("DATABASE_URL must use the postgresql+asyncpg:// driver")
+            raise ValueError("DATABASE_URL must use PostgreSQL with the asyncpg driver")
         return url
 
 

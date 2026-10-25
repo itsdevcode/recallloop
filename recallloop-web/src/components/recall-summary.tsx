@@ -30,9 +30,10 @@ export function RecallSummary() {
   return (
     <section
       aria-label="Today's Recall"
-      className="mt-8 rounded-2xl border border-forest/15 bg-sage/60 p-6 sm:p-8"
+      className="mt-8 rounded-3xl border border-forest/15 bg-sage/60 p-6 sm:p-9"
     >
-      <h2 className="text-2xl font-semibold">Today&apos;s Recall</h2>
+      <p className="eyebrow mb-3">Your daily practice</p>
+      <h2 className="editorial text-3xl">Today&apos;s Recall</h2>
       {error ? (
         <div role="alert" className="mt-4">
           <p>{error}</p>
@@ -47,7 +48,7 @@ export function RecallSummary() {
           </Button>
         </div>
       ) : !stats ? (
-        <p role="status" className="mt-4">
+        <p role="status" className="skeleton mt-4 p-5">
           Loading recall progress…
         </p>
       ) : (
@@ -82,6 +83,21 @@ export function RecallSummary() {
                   : "Your recall queue is empty. Save an article to create your first cards."}
             </p>
           )}
+          <div className="mt-7 grid gap-5 border-t border-forest/15 pt-6 sm:grid-cols-2">
+            <div>
+              <h3 className="eyebrow">Progress Summary</h3>
+              <p className="mt-2 text-sm text-muted">
+                {stats.total_cards} cards · {stats.total_completed_reviews}{" "}
+                completed reviews
+              </p>
+            </div>
+            <div>
+              <h3 className="eyebrow">Upcoming Reviews</h3>
+              <p className="mt-2 text-sm text-muted">
+                {stats.upcoming_next_7_days} scheduled in the next 7 UTC dates
+              </p>
+            </div>
+          </div>
           <Link
             href="/dashboard/schedule"
             className="mt-5 block text-sm font-medium underline"

@@ -4,7 +4,9 @@
 
 RecallLoop is an open-source learning companion that turns saved articles into
 recall cards and schedules focused reviews with a deterministic spaced-repetition policy.
-Bookmarks collect information; RecallLoop will help people remember it.
+Bookmarks preserve a link. RecallLoop gives its ideas a reason to return.
+Save a public article, let hosted Gemma create source-grounded questions, and
+practice one card at a time. Your recall ratings determine when each card returns.
 
 ## Implemented and planned
 
@@ -22,11 +24,11 @@ Implemented:
 - PostgreSQL job leases, bounded retries, per-user quotas, and recovery after queue loss.
 - Dashboard quick-add, saved count, recent articles, and Today's Recall progress.
 - Question-first recall sessions, Forgot/Hard/Easy ratings, review history, and a UTC schedule.
-  Get Started links to registration.
+- Editorial landing page, responsive workspace, and explicit privacy information.
 - Async SQLAlchemy sessions, Alembic migration, configurable settings and CORS.
 - Backend security/integration tests and real-browser auth/library tests.
 
-UI polish and deployment are the next phases. Social login, email verification,
+Production deployment remains an operator action. Social login, email verification,
 password recovery, refresh tokens, reminders, and cloud resource provisioning
 are not implemented by this PR.
 
@@ -136,7 +138,7 @@ The health route <http://localhost:8000/api/v1/health> and API documentation
 `{"status":"ok","service":"recallloop-api"}` without connecting to PostgreSQL.
 Authentication requires PostgreSQL and a JWT secret. The default development
 configuration allows health checks without either; production requires a secret,
-secure cookies, and an HTTPS frontend origin at startup.
+secure cookies, a database URL, and matching explicit HTTPS frontend/CORS origins at startup.
 
 ## Environment settings
 
@@ -147,7 +149,8 @@ Never commit real `.env` files or secrets. Backend settings:
 | --- | --- |
 | `APP_NAME` | `RecallLoop API` |
 | `APP_ENV` | `development`; use `production` on Render |
-| `DATABASE_URL` | `postgresql+asyncpg://...`; required for auth/migrations |
+| `DATABASE_URL` | PostgreSQL URL; standard Render `postgresql://` URLs are normalized to asyncpg; required for auth/migrations and production |
+| `DB_POOL_SIZE` / `DB_MAX_OVERFLOW` | `5` / `5`; API pool per process, with bounded checkout/query timeouts |
 | `JWT_SECRET_KEY` | No default; generate at least 32 random characters |
 | `JWT_ALGORITHM` | Only `HS256` is accepted |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15`; configurable from 1 to 15 |
@@ -165,7 +168,7 @@ Never commit real `.env` files or secrets. Backend settings:
 | `TEST_CELERY_BROKER_URL` | Browser tests only; separate local Redis database, never database 0 |
 
 Frontend `API_INTERNAL_URL` is the **server-only** FastAPI origin, defaulting to
-`http://127.0.0.1:8000`. Browser requests use relative `/api/auth/...` and `/api/articles` URLs. `NEXT_PUBLIC_API_URL` remains available for future non-auth API clients;
+`http://127.0.0.1:8000`. Render `host:port` values are also accepted. Browser requests use relative `/api/auth/...`, `/api/articles`, and `/api/reviews/...` URLs. `NEXT_PUBLIC_API_URL` remains available for future non-auth API clients;
 it is embedded at build time and must never contain a secret. Do not use it to
 send browser authentication directly across Render domains.
 
@@ -589,7 +592,8 @@ uv run pytest
 ```
 
 Tests read `TEST_DATABASE_URL` explicitly from the process environment, apply the
-real Alembic migration, and truncate **only the test articles and users tables** between tests.
+real Alembic migrations, and truncate the disposable database’s users, articles,
+concepts, cards, processing budgets, and review logs between tests.
 They refuse non-local hosts, names without `_test`, and any database sharing the
 development database name (including `.env` configuration). The migration test
 also downgrades/recreates the schema; the article migration test verifies that
@@ -604,6 +608,10 @@ forged/altered JWTs, CSRF failures, safe validation responses, migration round
 trips, metadata parity, and test-database safeguards. Article coverage adds
 ownership, per-user duplicate races, pagination, response byte/type limits,
 redirect validation, DNS pinning, parser deadlines, and deterministic HTML extraction.
+Review coverage includes UTC boundaries, schedule/history counts, concurrent and
+idempotent submissions, atomic rollback, cascades, migration backfill, and preserving
+reviewed material during worker retries. Readiness tests check healthy PostgreSQL
+and safe failures without making liveness depend on the database.
 
 Frontend checks, from `recallloop-web`:
 
@@ -626,7 +634,10 @@ I/O is replaced by `tests.browser_worker` fixtures; production has no mock flag 
 fallback output. The real worker calls the real Gemma adapter against a mocked SDK
 response, validates it, and persists results in PostgreSQL. Browser coverage includes
 PENDING/PROCESSING/READY, failed-job retry, concepts/reveal-answer, mobile library
-CRUD, and existing authentication. One PENDING snapshot and a transient list outage
+CRUD, and existing authentication. The release journey runs from landing through
+registration, article processing, recall, history, and logout; the recall flow tests
+all three ratings and a lost acknowledgment replay. Layout audits cover 320–1440px.
+One PENDING snapshot and a transient list outage
 are browser mocks for deterministic UI assertions. Test accounts remain in the
 disposable database until the next backend cleanup. Do not run backend destructive
 tests alongside browser/worker tests using the same database.
@@ -634,42 +645,32 @@ tests alongside browser/worker tests using the same database.
 
 ## Render deployment preparation
 
-No cloud resources are provisioned or deployed by this PR. The intended deployment
-has five resources: Next.js web service, FastAPI web service, PostgreSQL, Render Key
-Value/Valkey, and a **paid Render Background Worker**. Use the same workspace/region
-for private communication. Follow the [worker guide](https://render.com/docs/background-workers)
-and [Key Value guide](https://render.com/docs/key-value).
+The reviewed [render.yaml](render.yaml) describes Next.js, FastAPI, a Celery worker,
+PostgreSQL, and Key Value / Valkey in one production environment. It is configuration
+only: no resources were created or deployed. **All selected plans are paid**;
+workers have no free plan, and the API needs a paid web plan to receive private
+network traffic. Automatic commit deployments and preview environments are off.
+Creating a Blueprint can still provision and initially deploy resources, so explicit
+operator approval is required before applying it.
 
-- API root `recallloop-api`: build `pip install .`; start
-  `uvicorn app.main:app --host 0.0.0.0 --port "$PORT"`. Apply `alembic upgrade head`
-  in the deployment migration step before starting the new API/worker version.
-- Worker root `recallloop-api`: build `pip install .`; start
-  `celery -A app.workers.celery_app:celery_app worker --loglevel=info --concurrency=1`.
-  It needs no inbound port or HTTP health check. Celery SIGTERM starts warm shutdown;
-  set `maxShutdownDelaySeconds: 150` to let bounded jobs complete before SIGKILL.
-  Interrupted jobs recover through leases/reconciliation.
-- API and worker share `DATABASE_URL`, `CELERY_BROKER_URL`, `GEMINI_API_KEY`, and
-  `GEMMA_MODEL`. Use PostgreSQL's asyncpg URL and the **internal** Key Value URL
-  (`redis://...`, or authenticated internal URL if configured). Never expose broker
-  credentials, database URLs, or the Google key through `NEXT_PUBLIC_` variables.
-- Set Key Value eviction to `noeviction`. **Free Key Value is not durable**: all
-  queue data is lost on restart/upgrade. Database recovery is required even with a
-  paid durable broker because publishing and database commits are not atomic.
-- Web root `recallloop-web`: build `npm ci && npm run build`; start
-  `npm start -- --hostname 0.0.0.0 --port "$PORT"`. Set server-only
-  `API_INTERNAL_URL` to the trusted API service origin.
-- API auth: `APP_ENV=production`, generated `JWT_SECRET_KEY`,
-  `AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAMESITE=lax`, exact HTTPS
-  `FRONTEND_ORIGIN`, and matching explicit `CORS_ORIGINS` (never `*`). Configure the
-  shared production settings on the worker too if using `APP_ENV=production` there.
+Follow [the deployment runbook](docs/deployment.md) for service roots/builds/start
+commands, every service's environment variables, current Render references, explicit
+migration procedure, low-concurrency worker/recovery behavior, database pooling,
+monitoring, and launch gates. The Blueprint passes current Render JSON Schema
+validation. CLI/account validation and actual deployment remain unverified.
 
-The browser uses only the web origin's `/api/auth/...` and `/api/articles/...`;
-Next.js forwards cookies/security headers only to allowlisted API paths and returns
-host-only cookies for the web domain. Separate Render domains do not require
-third-party cookies, `SameSite=None`, or a shared cookie Domain. Deployment-level
-abuse controls and outbound restrictions remain defense in depth. Production Render
-memory/performance and live provider access must be verified during deployment;
-local real-broker tests use Redis 7, not a provisioned Render Valkey instance.
+The frontend keeps the internal API address server-only. The API and worker share
+internal database/broker references and a server-only provider key. HTTPS cookies,
+exact frontend/CORS origins, and existing CSRF checks are required. Public liveness
+remains `/api/v1/health`; `/api/v1/ready` separately checks database connectivity with
+a three-second bound and safe errors. Readiness does not validate the schema,
+queue, or provider. No migrations run during application import or worker startup.
+
+Before a public launch, configure auth abuse controls and request-body limits,
+verify backups and selected-plan capacity, supply operator contact/data deletion
+and backup-retention details on the privacy page, run live Gemma and deployed HTTPS
+release tests, and obtain explicit cost/deployment approval. Processing already has
+persisted quotas; registration/login do not yet have a distributed rate limiter.
 
 ### Live Gemma smoke test
 
@@ -685,6 +686,39 @@ It reports only model ID, elapsed time, success/failure category and concept cou
 never the key, article body or raw provider error. The smoke bypasses repair so it
 makes exactly one provider request. Deterministic tests always mock provider I/O.
 
-## License
+## Screenshots and release evidence
 
-[MIT](LICENSE).
+Real local-browser captures from the production Next.js build are included below.
+The dashboard account is a disposable test fixture. These are UI evidence, not a
+live deployment or successful live Gemma inference claim.
+
+![RecallLoop desktop landing page](docs/screenshots/landing-desktop.png)
+
+<details>
+<summary>Mobile landing and personal workspace</summary>
+
+![RecallLoop mobile landing page](docs/screenshots/landing-mobile.png)
+![RecallLoop personal learning workspace](docs/screenshots/dashboard-desktop.png)
+![RecallLoop answer reveal and rating](docs/screenshots/recall-desktop.png)
+
+</details>
+
+Release checks: **157 backend tests and 4 browser flows passed**, with no skips;
+Ruff lint/format, frontend lint/typecheck/production build, and Alembic heads/check
+also passed. One inherited Starlette TestClient/httpx deprecation warning remains.
+The Playwright release audit checks 320, 375, 390, 768, 1024, and 1440 pixel widths.
+Deterministic browser tests use actual local PostgreSQL, Redis, Celery, API, and web
+processes with external extraction/inference mocked. There are no claimed deployed
+production tests. The PR #6 smoke command exited 2 with `GEMINI_API_KEY is not
+configured`: **live Gemma inference is NOT VERIFIED** for this release. Run the
+command above with a real key before announcing successful generation.
+
+The [submission outline](docs/submission.md) is a truthful, unpublished draft;
+no public demo URL is available yet.
+
+## License and attribution
+
+[MIT](LICENSE). Gemma powers AI content generation; its model terms and the hosted
+provider terms apply separately. Scheduling is deterministic application code,
+not generated by Gemma. See [privacy information](recallloop-web/src/app/privacy/page.tsx)
+for stored data and provider disclosure.

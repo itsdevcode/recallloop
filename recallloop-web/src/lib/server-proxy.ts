@@ -14,7 +14,13 @@ export async function proxyApi(request: NextRequest, path: string) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  const upstream = process.env.API_INTERNAL_URL || "http://127.0.0.1:8000";
+  // Render hostport references contain no scheme; the value stays server-only.
+  const configured = process.env.API_INTERNAL_URL;
+  const upstream = configured
+    ? configured.includes("://")
+      ? configured
+      : `http://${configured}`
+    : "http://127.0.0.1:8000";
   try {
     const response = await fetch(new URL(path, upstream), {
       method: request.method,

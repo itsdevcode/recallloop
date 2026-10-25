@@ -18,7 +18,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = (
             create_async_engine(
-                settings.async_database_url, pool_pre_ping=True, hide_parameters=True
+                settings.async_database_url,
+                pool_pre_ping=True,
+                hide_parameters=True,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_timeout=5,
+                pool_recycle=1800,
+                connect_args={"timeout": 5, "command_timeout": 15},
             )
             if settings.database_url is not None
             else None

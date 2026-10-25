@@ -45,11 +45,14 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
     "mt-2 w-full rounded-xl border border-forest/25 bg-white px-4 py-3 text-forest focus:outline-2 focus:outline-forest";
   return (
     <Container className="py-12 sm:py-20">
-      <div className="mx-auto max-w-md">
+      <main
+        id="main-content"
+        className="mx-auto max-w-md rounded-3xl border border-forest/15 bg-white/50 p-6 sm:p-10"
+      >
         <Link href="/" className="font-semibold">
           RecallLoop
         </Link>
-        <h1 className="mt-10 text-3xl font-semibold">
+        <h1 className="editorial mt-10 text-4xl">
           {registering ? "Create your account" : "Welcome back"}
         </h1>
         <p className="mt-3 text-muted">
@@ -123,7 +126,7 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
             {registering ? "Log in" : "Create an account"}
           </Link>
         </p>
-      </div>
+      </main>
     </Container>
   );
 }
