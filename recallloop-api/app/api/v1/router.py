@@ -5,10 +5,12 @@ from pydantic import BaseModel
 
 from app.api.v1.endpoints.articles import router as articles_router
 from app.api.v1.endpoints.auth import router as auth_router
+from app.api.v1.endpoints.reviews import router as reviews_router
 
 router = APIRouter()
 router.include_router(auth_router)
 router.include_router(articles_router)
+router.include_router(reviews_router)
 
 
 class HealthResponse(BaseModel):

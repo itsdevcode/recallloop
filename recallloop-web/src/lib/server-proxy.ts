@@ -9,6 +9,7 @@ export async function proxyApi(request: NextRequest, path: string) {
     "content-type",
     "x-csrf-protection",
     "sec-fetch-site",
+    "idempotency-key",
   ]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);

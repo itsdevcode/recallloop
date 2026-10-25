@@ -82,9 +82,7 @@ test("mobile article library: protect, add, read, errors, retry and confirmed de
     page.getByRole("link", { name: "Read original article" }),
   ).toHaveAttribute("href", url);
   await expect(
-    page.getByText(
-      "Daily reviews and adaptive scheduling are coming in PR #5.",
-    ),
+    page.getByText("Your cards are ready for active recall."),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Key ideas & recall questions" }),

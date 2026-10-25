@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import delete, select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.gemma import AIError, TransientAIError, generate_learning
 from app.core.config import LEASE_SECONDS, MAX_ATTEMPTS, Settings
@@ -43,6 +43,8 @@ async def process_article(
             return Outcome("ignored")
         if article.available_at > now:
             return Outcome("ignored")
+        if await preserve_reviewed_material(session, article):
+            return Outcome("ready")
         if article.processing_attempts >= MAX_ATTEMPTS:
             article.status = ArticleStatus.FAILED
             article.error_message = "Processing reached its retry limit. Please contact support."
@@ -84,6 +86,8 @@ async def process_article(
                 article = await session.scalar(select(Article).where(*owned).with_for_update())
                 if article is None:
                     return Outcome("ignored")
+                if await preserve_reviewed_material(session, article):
+                    return Outcome("ready")
                 # Atomic replacement and the article lease fence prevent retry duplicates.
                 await session.execute(delete(Concept).where(Concept.article_id == article_id))
                 for position, data in enumerate(generated.learning.concepts):
@@ -144,3 +148,26 @@ async def process_article(
         except Exception:
             pass
         return Outcome("failed")
+
+
+async def preserve_reviewed_material(session: AsyncSession, article: Article) -> bool:
+    """Caller holds the article lock, shared with the review submission transaction."""
+    reviewed = await session.scalar(
+        select(RecallCard.id)
+        .join(Concept)
+        .where(
+            Concept.article_id == article.id,
+            RecallCard.review_count > 0,
+        )
+        .limit(1)
+    )
+    if reviewed is None:
+        return False
+    article.status = ArticleStatus.READY
+    article.error_message = None
+    note = "Existing reviewed cards and progress were preserved; regeneration is disabled."
+    if note not in (article.processing_note or ""):
+        article.processing_note = "\n".join(filter(None, [article.processing_note, note]))
+    article.lease_token = None
+    article.lease_expires_at = None
+    return True

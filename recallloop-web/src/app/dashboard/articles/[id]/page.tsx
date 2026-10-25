@@ -68,11 +68,7 @@ function ArticleView({ id }: { id: string }) {
     setBusy(true);
     setError("");
     try {
-      const value = await articleRequest<Article>(
-        `/${id}/retry`,
-        "POST",
-        {},
-      );
+      const value = await articleRequest<Article>(`/${id}/retry`, "POST", {});
       setArticle((previous) => (previous ? { ...previous, ...value } : null));
       setConcepts([]);
       setPaused(false);
@@ -214,7 +210,19 @@ function ArticleView({ id }: { id: string }) {
             </section>
           )}
           <p className="mt-10 border-t border-forest/15 pt-6 text-sm text-muted">
-            Daily reviews and adaptive scheduling are coming in PR #5.
+            {article.status === "READY" ? (
+              <>
+                Your cards are ready for active recall.{" "}
+                <Link
+                  href="/dashboard/review"
+                  className="font-medium underline"
+                >
+                  Start Recall
+                </Link>
+              </>
+            ) : (
+              "Recall cards will be available after successful processing."
+            )}
           </p>
         </>
       )}
