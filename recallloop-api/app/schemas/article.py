@@ -27,6 +27,9 @@ class ArticleSummary(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+    processing_attempts: int
+    processing_note: str | None
+    ai_model: str | None
 
 
 class ArticleDetail(ArticleSummary):
@@ -38,3 +41,20 @@ class ArticlePage(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+class CardResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    question: str
+    answer: str
+
+
+class ConceptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: UUID
+    title: str
+    explanation: str
+    source_excerpt: str
+    position: int
+    cards: list[CardResponse]

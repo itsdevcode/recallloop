@@ -1,11 +1,26 @@
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Text, UniqueConstraint, func, text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+    text,
+)
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
+
+if TYPE_CHECKING:
+    from app.models.learning import Concept
 
 
 class ArticleStatus(StrEnum):
@@ -21,6 +36,7 @@ class Article(Base):
         UniqueConstraint("user_id", "canonical_url", name="uq_articles_user_canonical_url"),
         Index("ix_articles_user_created", "user_id", "created_at"),
         Index("ix_articles_user_status", "user_id", "status"),
+        Index("ix_articles_recovery", "status", "updated_at"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
@@ -39,4 +55,19 @@ class Article(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    processing_attempts: Mapped[int] = mapped_column(Integer, server_default="0")
+    lease_token: Mapped[UUID | None]
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    ai_model: Mapped[str | None] = mapped_column(String(100))
+    processing_note: Mapped[str | None] = mapped_column(Text)
+    concepts: Mapped[list["Concept"]] = relationship(
+        back_populates="article",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        order_by="Concept.position",
     )

@@ -10,6 +10,9 @@ export type Article = {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  processing_attempts: number;
+  processing_note: string | null;
+  ai_model: string | null;
 };
 export type ArticleDetail = Article & { content: string | null };
 export type ArticlePage = {
@@ -47,3 +50,12 @@ export async function articleRequest<T>(
   }
   return response.status === 204 ? (undefined as T) : response.json();
 }
+
+export type Concept = {
+  id: string;
+  title: string;
+  explanation: string;
+  source_excerpt: string;
+  position: number;
+  cards: { id: string; question: string; answer: string }[];
+};

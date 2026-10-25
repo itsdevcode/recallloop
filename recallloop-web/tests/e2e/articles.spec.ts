@@ -32,11 +32,42 @@ test("mobile article library: protect, add, read, errors, retry and confirmed de
     page.getByRole("heading", { name: "Your library starts here" }),
   ).toBeVisible();
   const url = `https://example.com/browser-${randomUUID()}`;
+  // Hold the first list snapshot at PENDING to test that view deterministically;
+  // queue delivery, worker execution and subsequent polling still use real services.
+  await page.route(
+    "**/api/articles",
+    async (route) => {
+      if (route.request().method() !== "POST") {
+        await route.continue();
+        return;
+      }
+      const response = await route.fetch();
+      expect(response.status()).toBe(202);
+      const saved = await response.json();
+      expect(saved.status).toBe("PENDING");
+      await page.route(
+        "**/api/articles?**",
+        async (listRoute) => {
+          await listRoute.fulfill({
+            json: { items: [saved], total: 1, limit: 10, offset: 0 },
+          });
+        },
+        { times: 1 },
+      );
+      await route.fulfill({ response });
+    },
+    { times: 1 },
+  );
   await page.getByLabel("Save an article", { exact: true }).fill(url);
   await page.getByRole("button", { name: "Save article", exact: true }).click();
+  await expect(page.getByText("PENDING", { exact: true })).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Learning that lasts", exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Save article", exact: true }),
+  ).toBeEnabled();
+  await expect(page.getByText("PROCESSING", { exact: true })).toBeVisible();
   await expect(page.getByText("READY", { exact: true })).toBeVisible();
   await page
     .getByRole("link", { name: "Learning that lasts", exact: true })
@@ -45,13 +76,28 @@ test("mobile article library: protect, add, read, errors, retry and confirmed de
     page.getByRole("heading", { name: "Learning that lasts" }),
   ).toBeVisible();
   await expect(
-    page.getByText(/Active recall helps learners/, { exact: false }),
+    page.getByText(/Active recall helps learners/, { exact: false }).last(),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Read original article" }),
   ).toHaveAttribute("href", url);
   await expect(
-    page.getByText("AI-generated recall cards are coming in a future phase."),
+    page.getByText(
+      "Daily reviews and adaptive scheduling are coming in PR #5.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Key ideas & recall questions" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Active recall", exact: true }),
+  ).toBeVisible();
+  await page.getByText("Reveal answer", { exact: true }).first().click();
+  await expect(
+    page.getByText(
+      "It helps learners remember important concepts by recalling them.",
+      { exact: true },
+    ),
   ).toBeVisible();
   await page.getByRole("link", { name: "Back to library" }).click();
   await page.getByLabel("Save an article", { exact: true }).fill(url);
@@ -117,5 +163,14 @@ test("mobile article library: protect, add, read, errors, retry and confirmed de
     page.getByText("The fixture website could not be accessed.", {
       exact: true,
     }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Retry processing", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Key ideas & recall questions" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Learning that lasts", exact: true }),
   ).toBeVisible();
 });

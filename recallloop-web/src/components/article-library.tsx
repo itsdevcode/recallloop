@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/button";
@@ -19,6 +19,8 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
   const [url, setUrl] = useState("");
   const [confirmId, setConfirmId] = useState<string | null>(null);
   const limit = recent ? 5 : 10;
+  const pollCount = useRef(0);
+  const [pollPaused, setPollPaused] = useState(false);
   const fail = useCallback(
     (error: unknown) => {
       if (error instanceof ApiError && error.status === 401)
@@ -70,6 +72,64 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
     };
   }, [limit, fail]);
 
+  useEffect(() => {
+    if (
+      !items.some(
+        (item) => item.status === "PENDING" || item.status === "PROCESSING",
+      )
+    )
+      return;
+    let active = true;
+    let fetching = false;
+    const timer = window.setInterval(async () => {
+      if (document.visibilityState !== "visible" || fetching) return;
+      if (pollCount.current >= 100) {
+        setPollPaused(true);
+        window.clearInterval(timer);
+        return;
+      }
+      pollCount.current += 1;
+      fetching = true;
+      try {
+        const page = await articleRequest<ArticlePage>(
+          `?limit=${Math.min(100, Math.max(items.length, limit))}&offset=0`,
+        );
+        if (active) {
+          setItems((previous) => [
+            ...page.items,
+            ...previous.slice(page.items.length),
+          ]);
+          setTotal(page.total);
+        }
+      } catch (error) {
+        if (active) fail(error);
+      } finally {
+        fetching = false;
+      }
+    }, 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [items, limit, fail]);
+
+  async function retryProcessing(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      const article = await articleRequest<Article>(`/${id}/retry`, "POST", {});
+      pollCount.current = 0;
+      setPollPaused(false);
+      setItems((previous) =>
+        previous.map((value) => (value.id === id ? article : value)),
+      );
+    } catch (error) {
+      fail(error);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function add(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -80,13 +140,14 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
         url: url.trim(),
       });
       setUrl("");
-      setNotice(
-        article.status === "FAILED"
-          ? `Saved, but extraction failed: ${article.error_message}`
-          : "Article saved and ready to read.",
-      );
+      setNotice("Article saved. Learning material is being prepared.");
+      setItems((previous) => [article, ...previous].slice(0, limit));
+      setTotal((previous) => previous + 1);
+      pollCount.current = 0;
+      setPollPaused(false);
       await load();
     } catch (error) {
+      if (error instanceof ApiError && error.status === 503) await load();
       fail(error);
     } finally {
       setBusy(false);
@@ -135,7 +196,7 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
           </Button>
         </div>
         <p className="mt-3 text-sm text-muted">
-          Public HTML articles only. Extraction may take up to 20 seconds.
+          Public HTML articles only. Processing continues in the background.
         </p>
       </form>
       {notice && (
@@ -160,6 +221,21 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
             Retry loading articles
           </button>
         </div>
+      )}
+      {pollPaused && (
+        <p className="mt-4 text-sm text-muted">
+          Automatic updates paused.{" "}
+          <button
+            className="underline"
+            onClick={() => {
+              pollCount.current = 0;
+              setPollPaused(false);
+              void load();
+            }}
+          >
+            Refresh status
+          </button>
+        </p>
       )}
       <h2 className="mt-8 text-xl font-semibold">
         {recent ? "Recent articles" : "Saved articles"}{" "}
@@ -207,6 +283,15 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
               <p className="mt-3 text-sm text-red-800">
                 {article.error_message}
               </p>
+            )}
+            {article.status === "FAILED" && article.processing_attempts < 3 && (
+              <Button
+                className="mt-4 mr-4"
+                disabled={busy}
+                onClick={() => void retryProcessing(article.id)}
+              >
+                Retry processing
+              </Button>
             )}
             {confirmId === article.id ? (
               <div

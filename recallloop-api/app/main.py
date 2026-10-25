@@ -1,4 +1,3 @@
-import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -25,7 +24,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else None
         )
         app.state.db_engine = engine
-        app.state.extraction_slots = asyncio.Semaphore(4)
         try:
             yield
         finally:

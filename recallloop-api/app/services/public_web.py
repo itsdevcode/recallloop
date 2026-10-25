@@ -22,6 +22,10 @@ class ExtractionError(Exception):
     """Only predefined, safe display messages may be used."""
 
 
+class TransientExtractionError(ExtractionError):
+    pass
+
+
 def require_public_ip(value: str) -> None:
     try:
         address = ipaddress.ip_address(value)
@@ -123,6 +127,8 @@ class PublicResolver(AbstractResolver):
 
 
 async def read_html(response: aiohttp.ClientResponse) -> bytes:
+    if response.status == 429 or response.status >= 500:
+        raise TransientExtractionError("The website is temporarily unavailable.")
     if response.status != 200:
         raise ExtractionError(
             "The website could not be accessed. It may require a login or block downloads."
@@ -176,8 +182,10 @@ async def fetch_public_html(value: str) -> bytes:
         raise ExtractionError(
             "The URL or a redirect does not point to a permitted public website."
         ) from None
-    except (TimeoutError, aiohttp.ClientError, OSError, ValueError):
-        raise ExtractionError(
+    except (TimeoutError, aiohttp.ClientConnectionError, OSError):
+        raise TransientExtractionError(
             "The article could not be downloaded safely within the time limit."
         ) from None
+    except (aiohttp.ClientError, ValueError):
+        raise ExtractionError("The website could not be accessed safely.") from None
     raise ExtractionError("The website could not be accessed.")
