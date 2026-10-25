@@ -303,12 +303,12 @@ export default function Home() {
               <span className="inline-block text-xs font-semibold uppercase tracking-[0.2em] text-sage">
                 READY TO RETAIN MORE
               </span>
-              <h2 className="editorial mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl lg:text-6xl text-white">
+              <h2 className="editorial mx-auto mt-4 max-w-2xl text-3xl font-semibold tracking-tight sm:text-5xl lg:text-6xl text-white !text-white">
                 Stop collecting links.
                 <br />
                 Start remembering ideas.
               </h2>
-              <p className="mx-auto mt-6 max-w-xl text-base text-white/80 sm:text-lg">
+              <p className="mx-auto mt-6 max-w-xl text-base text-white/85 sm:text-lg">
                 Join readers and learners giving their bookmarks permanent residence in memory.
               </p>
               <div className="mt-10">
