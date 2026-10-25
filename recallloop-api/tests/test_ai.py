@@ -135,6 +135,15 @@ def test_less_than_three_supported_concepts_and_input_budget():
     assert "omitted" in note
 
 
+def test_concise_grounded_answer_validates():
+    data = copy.deepcopy(LEARNING_JSON)
+    data["concepts"][0]["answer"] = "It rolls back."
+    data["concepts"][0]["question"] = "What happens?"
+    validated = GeneratedLearning.model_validate(data)
+    assert validated.concepts[0].answer == "It rolls back."
+    assert validated.concepts[0].question == "What happens?"
+
+
 @pytest.mark.asyncio
 async def test_empty_content_never_invokes_provider(monkeypatch):
     factory, _ = mock_sdk(monkeypatch, [])
