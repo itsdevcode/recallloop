@@ -21,6 +21,7 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
   const limit = recent ? 5 : 10;
   const pollCount = useRef(0);
   const [pollPaused, setPollPaused] = useState(false);
+
   const fail = useCallback(
     (error: unknown) => {
       if (error instanceof ApiError && error.status === 401)
@@ -34,6 +35,7 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
     },
     [router],
   );
+
   const load = useCallback(
     async (offset = 0) => {
       try {
@@ -53,6 +55,7 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
     },
     [limit, fail],
   );
+
   useEffect(() => {
     let active = true;
     articleRequest<ArticlePage>(`?limit=${limit}&offset=0`)
@@ -153,6 +156,7 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
       setBusy(false);
     }
   }
+
   async function remove(id: string) {
     setBusy(true);
     setError("");
@@ -167,19 +171,38 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
       setBusy(false);
     }
   }
+
+  function statusBadge(status: Article["status"]) {
+    switch (status) {
+      case "READY":
+        return "bg-sage text-forest font-semibold";
+      case "PROCESSING":
+        return "bg-blue-50 text-blue-700 font-medium";
+      case "PENDING":
+        return "bg-black/[0.05] text-muted font-medium";
+      case "FAILED":
+        return "bg-red-50 text-red-700 font-semibold";
+      default:
+        return "bg-surface text-muted";
+    }
+  }
+
   return (
     <section
       className="mt-8"
       aria-label={recent ? "Recent articles" : "Article library"}
     >
-      <h2 className="eyebrow mb-4">
-        {recent ? "Quick Save Article" : "Keep your next good read"}
-      </h2>
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="eyebrow text-forest">
+          {recent ? "Quick Save Article" : "Keep your next good read"}
+        </h2>
+      </div>
+
       <form
         onSubmit={add}
-        className="rounded-2xl border border-forest/15 bg-sage/30 p-5 sm:p-6"
+        className="rounded-3xl border border-black/[0.06] bg-surface p-5 sm:p-7 shadow-2xs"
       >
-        <label htmlFor="article-url" className="block font-medium">
+        <label htmlFor="article-url" className="block text-sm font-semibold text-dark">
           Save an article
         </label>
         <div className="mt-3 flex flex-col gap-3 sm:flex-row">
@@ -192,29 +215,31 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
             disabled={busy}
             onChange={(event) => setUrl(event.target.value)}
             placeholder="https://example.com/article"
-            className="min-w-0 flex-1 rounded-xl border border-forest/20 bg-white px-4 py-3 focus:outline-2 focus:outline-forest"
+            className="min-w-0 flex-1 rounded-2xl border border-black/15 bg-white px-4 py-3 text-dark placeholder:text-muted/60 transition-all focus:border-forest focus:outline-2 focus:outline-forest/30 shadow-2xs"
           />
-          <Button type="submit" disabled={busy}>
+          <Button type="submit" disabled={busy} className="min-h-12 px-7">
             {busy ? "Please wait…" : "Save article"}
           </Button>
         </div>
-        <p className="mt-3 text-sm text-muted">
+        <p className="mt-3 text-xs text-muted">
           Public HTML articles only. Processing continues in the background.
         </p>
       </form>
+
       {notice && (
-        <p role="status" className="mt-5 text-sm">
-          {notice}
-        </p>
+        <div role="status" className="mt-4 rounded-2xl bg-sage/60 border border-sage-dark p-4 text-xs font-medium text-forest">
+          <p>{notice}</p>
+        </div>
       )}
+
       {error && (
         <div
           role="alert"
-          className="mt-5 rounded-xl border border-red-800/20 p-4 text-red-800"
+          className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-xs font-medium text-red-800"
         >
           <p>{error}</p>
           <button
-            className="mt-2 font-medium underline"
+            className="mt-2 font-semibold underline"
             onClick={() => {
               setError("");
               setLoading(true);
@@ -225,11 +250,12 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
           </button>
         </div>
       )}
+
       {pollPaused && (
-        <p className="mt-4 text-sm text-muted">
+        <p className="mt-4 text-xs text-muted">
           Automatic updates paused.{" "}
           <button
-            className="underline"
+            className="underline font-medium text-dark"
             onClick={() => {
               pollCount.current = 0;
               setPollPaused(false);
@@ -240,108 +266,124 @@ export function ArticleLibrary({ recent = false }: { recent?: boolean }) {
           </button>
         </p>
       )}
-      <h2 className="mt-8 text-xl font-semibold">
-        {recent ? "Recent articles" : "Saved articles"}{" "}
-        <span className="font-normal text-muted">({total})</span>
-      </h2>
+
+      <div className="mt-10 flex items-center justify-between">
+        <h2 className="text-xl font-semibold tracking-tight text-dark">
+          {recent ? "Recent articles" : "Saved articles"}{" "}
+          <span className="font-normal text-muted">({total})</span>
+        </h2>
+      </div>
+
       {loading && (
-        <p role="status" className="skeleton mt-5 p-6 text-muted">
-          Loading articles…
-        </p>
+        <div role="status" className="skeleton mt-4 p-8 text-center text-sm text-muted">
+          <p>Loading articles…</p>
+        </div>
       )}
+
       {!loading && !error && items.length === 0 && (
-        <div className="mt-5 rounded-2xl border border-dashed border-forest/25 p-8 text-center">
-          <h3 className="font-semibold">Your library starts here</h3>
-          <p className="mt-2 text-muted">
+        <div className="mt-4 rounded-3xl border border-dashed border-black/15 bg-white p-10 text-center shadow-2xs">
+          <h3 className="text-base font-semibold text-dark">Your library starts here</h3>
+          <p className="mt-1.5 text-sm text-muted">
             Save your first article to keep its readable text in one place.
           </p>
         </div>
       )}
-      <ul className="mt-5 space-y-4">
+
+      <ul className="mt-4 space-y-3.5">
         {items.map((article) => (
           <li
             key={article.id}
-            className="rounded-2xl border border-forest/15 bg-white/50 p-5 sm:p-6"
+            className="group rounded-2xl border border-black/[0.06] bg-white p-5 sm:p-6 transition-all duration-200 hover:shadow-md"
           >
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
-              <span className="break-all">
+              <span className="break-all font-medium text-muted">
                 {article.source || new URL(article.url).hostname}
               </span>
-              <span className="rounded-full bg-sage px-3 py-1 font-medium text-forest">
+              <span className={`rounded-full px-3 py-0.5 text-xs ${statusBadge(article.status)}`}>
                 {article.status}
               </span>
             </div>
+
             <Link
               href={`/dashboard/articles/${article.id}`}
-              className="mt-3 block break-words text-lg font-semibold underline-offset-4 hover:underline"
+              className="mt-2.5 block break-words text-lg font-semibold tracking-tight text-dark transition-colors group-hover:text-forest"
             >
               {article.title || article.url}
             </Link>
+
             {article.excerpt && (
-              <p className="mt-3 break-words text-sm leading-relaxed text-muted">
+              <p className="mt-2 break-words text-sm leading-relaxed text-muted line-clamp-2">
                 {article.excerpt}
               </p>
             )}
+
             {article.error_message && (
-              <p className="mt-3 text-sm text-red-800">
+              <p className="mt-3 text-xs font-medium text-red-700 bg-red-50 p-2.5 rounded-xl border border-red-100">
                 {article.error_message}
               </p>
             )}
-            {article.status === "FAILED" && article.processing_attempts < 3 && (
-              <Button
-                className="mt-4 mr-4"
-                disabled={busy}
-                onClick={() => void retryProcessing(article.id)}
-              >
-                Retry processing
-              </Button>
-            )}
-            {confirmId === article.id ? (
-              <div
-                role="group"
-                aria-label="Confirm deletion"
-                className="mt-4 flex flex-wrap items-center gap-4 text-sm"
-              >
-                <p>Delete this saved article?</p>
+
+            <div className="mt-4 flex flex-wrap items-center gap-4 text-xs font-medium">
+              {article.status === "FAILED" && article.processing_attempts < 3 && (
+                <Button
+                  className="min-h-9 px-4 py-1.5 text-xs"
+                  disabled={busy}
+                  onClick={() => void retryProcessing(article.id)}
+                >
+                  Retry processing
+                </Button>
+              )}
+
+              {confirmId === article.id ? (
+                <div
+                  role="group"
+                  aria-label="Confirm deletion"
+                  className="flex flex-wrap items-center gap-3 text-xs"
+                >
+                  <p className="font-medium text-dark">Delete this saved article?</p>
+                  <button
+                    disabled={busy}
+                    onClick={() => void remove(article.id)}
+                    className="font-semibold text-red-700 underline underline-offset-2"
+                  >
+                    Confirm delete
+                  </button>
+                  <button
+                    disabled={busy}
+                    onClick={() => setConfirmId(null)}
+                    className="text-muted underline underline-offset-2 hover:text-dark"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
                 <button
                   disabled={busy}
-                  onClick={() => void remove(article.id)}
-                  className="font-semibold text-red-800 underline"
+                  onClick={() => setConfirmId(article.id)}
+                  className="text-muted underline underline-offset-2 hover:text-red-700 transition-colors"
                 >
-                  Confirm delete
+                  Delete
                 </button>
-                <button
-                  disabled={busy}
-                  onClick={() => setConfirmId(null)}
-                  className="underline"
-                >
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                disabled={busy}
-                onClick={() => setConfirmId(article.id)}
-                className="mt-4 text-sm text-muted underline"
-              >
-                Delete
-              </button>
-            )}
+              )}
+            </div>
           </li>
         ))}
       </ul>
+
       {!recent && items.length < total && (
-        <Button
-          className="mt-6"
-          disabled={loading || busy}
-          onClick={() => {
-            setError("");
-            setLoading(true);
-            void load(items.length);
-          }}
-        >
-          Load more
-        </Button>
+        <div className="mt-8 text-center">
+          <Button
+            className="min-h-11 px-8"
+            disabled={loading || busy}
+            onClick={() => {
+              setError("");
+              setLoading(true);
+              void load(items.length);
+            }}
+          >
+            Load more
+          </Button>
+        </div>
       )}
     </section>
   );

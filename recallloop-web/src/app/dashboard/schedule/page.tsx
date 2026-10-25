@@ -1,4 +1,5 @@
 "use client";
+
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/button";
@@ -17,6 +18,7 @@ export default function SchedulePage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [attempt, setAttempt] = useState(0);
+
   useEffect(() => {
     let active = true;
     Promise.all([
@@ -39,6 +41,7 @@ export default function SchedulePage() {
       active = false;
     };
   }, [attempt, router]);
+
   async function moreHistory() {
     if (!history) return;
     setBusy(true);
@@ -56,18 +59,24 @@ export default function SchedulePage() {
       setBusy(false);
     }
   }
+
   return (
-    <>
-      <h1 className="text-3xl font-semibold">Review Schedule</h1>
-      <p className="mt-3 text-muted">
-        Calendar groups use UTC. Exact review times below use your local
-        timezone.
-      </p>
+    <div className="space-y-10 sm:space-y-12">
+      <div>
+        <span className="eyebrow text-forest">SPACED REPETITION ENGINE</span>
+        <h1 className="editorial mt-1 text-3xl font-semibold tracking-tight text-dark sm:text-4xl">
+          Review Schedule
+        </h1>
+        <p className="mt-2 text-sm text-muted">
+          Calendar groups use UTC. Exact review times below use your local timezone.
+        </p>
+      </div>
+
       {error && (
-        <div role="alert" className="mt-5">
+        <div role="alert" className="rounded-3xl bg-red-50 border border-red-200 p-6 text-sm text-red-800">
           <p>{error}</p>
           <Button
-            className="mt-4"
+            className="mt-4 min-h-10 text-xs"
             onClick={() => {
               setError("");
               setAttempt((v) => v + 1);
@@ -77,84 +86,104 @@ export default function SchedulePage() {
           </Button>
         </div>
       )}
+
       {!schedule || !history ? (
-        <p role="status" className="mt-8">
-          Loading your review schedule…
-        </p>
+        <div role="status" className="skeleton p-12 text-center text-sm text-muted">
+          <p>Loading your review schedule…</p>
+        </div>
       ) : (
         <>
-          <dl className="mt-7 grid gap-4 sm:grid-cols-2">
-            <div className="rounded-2xl border border-forest/15 bg-sage/50 p-5">
-              <dt>Overdue from earlier UTC dates</dt>
-              <dd className="mt-2 text-3xl font-semibold">
+          {/* Quick Metrics */}
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <div className="rounded-3xl border border-black/[0.06] bg-surface p-6 shadow-2xs">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-muted">Overdue from earlier UTC dates</dt>
+              <dd className="mt-2 text-4xl font-semibold tracking-tight text-dark">
                 {schedule.overdue}
               </dd>
             </div>
-            <div className="rounded-2xl border border-forest/15 bg-white/50 p-5">
-              <dt>Due today so far (UTC)</dt>
-              <dd className="mt-2 text-3xl font-semibold">
+            <div className="rounded-3xl border border-black/[0.06] bg-surface p-6 shadow-2xs">
+              <dt className="text-xs font-semibold uppercase tracking-wider text-muted">Due today so far (UTC)</dt>
+              <dd className="mt-2 text-4xl font-semibold tracking-tight text-dark">
                 {schedule.due_today}
               </dd>
             </div>
           </dl>
-          <h2 className="mt-9 text-xl font-semibold">
-            Upcoming reviews · next 7 UTC dates
-          </h2>
-          <p className="mt-2 text-sm text-muted">
-            Future cards only; overdue and currently due cards are counted
-            above.
-          </p>
-          <ul className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-            {schedule.upcoming.map((day) => (
-              <li
-                key={day.date}
-                className="rounded-xl border border-forest/15 p-4"
-              >
-                <p className="text-sm text-muted">
-                  {new Date(`${day.date}T00:00:00Z`).toLocaleDateString(
-                    undefined,
-                    { timeZone: "UTC", month: "short", day: "numeric" },
-                  )}
-                </p>
-                <p className="mt-2 text-2xl font-semibold">{day.count}</p>
-              </li>
-            ))}
-          </ul>
-          <h2 className="mt-10 text-xl font-semibold">
-            Review history ({history.total})
-          </h2>
-          {history.items.length === 0 ? (
-            <p className="mt-4 text-muted">
-              No reviews yet. Your completed reviews will appear here.
+
+          {/* 7-day Upcoming Grid */}
+          <section className="rounded-3xl border border-black/[0.06] bg-surface p-6 sm:p-8 shadow-2xs">
+            <h2 className="text-lg font-semibold tracking-tight text-dark">
+              Upcoming reviews · next 7 UTC dates
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              Future cards only; overdue and currently due cards are counted above.
             </p>
-          ) : (
-            <ul className="mt-4 space-y-4">
-              {history.items.map((log) => (
+
+            <ul className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+              {schedule.upcoming.map((day) => (
                 <li
-                  key={log.id}
-                  className="rounded-2xl border border-forest/15 bg-white/50 p-5"
+                  key={day.date}
+                  className="rounded-2xl border border-black/[0.06] bg-white p-4 text-center transition-all hover:shadow-sm"
                 >
-                  <p className="text-xs text-muted">
-                    {log.article_title || "Saved article"} · {log.rating}
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted">
+                    {new Date(`${day.date}T00:00:00Z`).toLocaleDateString(
+                      undefined,
+                      { timeZone: "UTC", month: "short", day: "numeric" },
+                    )}
                   </p>
-                  <h3 className="mt-2 break-words font-semibold">
-                    {log.question}
-                  </h3>
-                  <p className="mt-3 text-sm text-muted">
-                    Reviewed {localDate(log.reviewed_at)} · Next review{" "}
-                    {localDate(log.next_review_at)}
-                  </p>
+                  <p className="mt-2 text-2xl font-semibold text-dark">{day.count}</p>
+                  <span className="text-[0.65rem] text-muted">cards</span>
                 </li>
               ))}
             </ul>
-          )}
-          {history.items.length < history.total && (
-            <Button className="mt-6" disabled={busy} onClick={moreHistory}>
-              {busy ? "Loading…" : "Load more history"}
-            </Button>
-          )}
+          </section>
+
+          {/* Review History */}
+          <section className="space-y-4">
+            <h2 className="text-xl font-semibold tracking-tight text-dark">
+              Review history ({history.total})
+            </h2>
+
+            {history.items.length === 0 ? (
+              <div className="rounded-3xl border border-dashed border-black/15 bg-white p-8 text-center text-sm text-muted">
+                No reviews yet. Your completed reviews will appear here.
+              </div>
+            ) : (
+              <ul className="space-y-3">
+                {history.items.map((log) => (
+                  <li
+                    key={log.id}
+                    className="rounded-2xl border border-black/[0.06] bg-white p-5 sm:p-6 transition-all hover:shadow-sm"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted">
+                      <span className="font-medium text-dark/70">
+                        {log.article_title || "Saved article"}
+                      </span>
+                      <span className="rounded-full bg-sage px-2.5 py-0.5 text-xs font-semibold text-forest">
+                        {log.rating}
+                      </span>
+                    </div>
+                    <h3 className="mt-2 break-words text-base font-semibold text-dark">
+                      {log.question}
+                    </h3>
+                    <p className="mt-3 text-xs text-muted">
+                      Reviewed {localDate(log.reviewed_at)} · Next review{" "}
+                      {localDate(log.next_review_at)}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {history.items.length < history.total && (
+              <div className="pt-2 text-center">
+                <Button className="min-h-11 px-8 text-xs font-semibold" disabled={busy} onClick={moreHistory}>
+                  {busy ? "Loading…" : "Load more history"}
+                </Button>
+              </div>
+            )}
+          </section>
         </>
       )}
-    </>
+    </div>
   );
 }
