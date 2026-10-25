@@ -42,91 +42,111 @@ export function AuthForm({ mode }: { mode: "login" | "register" }) {
   }
 
   const inputStyle =
-    "mt-2 w-full rounded-xl border border-forest/25 bg-white px-4 py-3 text-forest focus:outline-2 focus:outline-forest";
+    "mt-2 w-full rounded-xl border border-black/15 bg-white px-4 py-3 text-dark placeholder:text-muted/60 transition-all focus:border-forest focus:outline-2 focus:outline-forest/30 shadow-2xs";
+
   return (
-    <Container className="py-12 sm:py-20">
-      <main
-        id="main-content"
-        className="mx-auto max-w-md rounded-3xl border border-forest/15 bg-white/50 p-6 sm:p-10"
-      >
-        <Link href="/" className="font-semibold">
-          RecallLoop
-        </Link>
-        <h1 className="editorial mt-10 text-4xl">
-          {registering ? "Create your account" : "Welcome back"}
-        </h1>
-        <p className="mt-3 text-muted">
-          {registering
-            ? "Save it. Learn it. Remember it."
-            : "Sign in to your learning companion."}
-        </p>
-        <form onSubmit={submit} className="mt-8 space-y-5" aria-busy={busy}>
-          <fieldset disabled={busy} className="space-y-5">
-            {registering && (
-              <label className="block text-sm font-medium">
-                Name
+    <div className="min-h-screen bg-surface py-12 sm:py-20 flex items-center justify-center">
+      <Container className="max-w-md">
+        <main
+          id="main-content"
+          className="rounded-3xl border border-black/[0.06] bg-white p-7 sm:p-10 shadow-lg"
+        >
+          <div className="flex items-center justify-between">
+            <Link
+              href="/"
+              className="inline-flex items-center gap-2 text-base font-semibold tracking-tight text-dark transition-opacity hover:opacity-80"
+            >
+              <span className="text-forest text-lg" aria-hidden="true">↻</span>
+              <span>RecallLoop</span>
+            </Link>
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted">
+              {registering ? "Account Setup" : "Sign In"}
+            </span>
+          </div>
+
+          <h1 className="editorial mt-8 text-3xl font-semibold tracking-tight text-dark sm:text-4xl">
+            {registering ? "Create your account" : "Welcome back"}
+          </h1>
+          <p className="mt-2 text-sm text-muted">
+            {registering
+              ? "Save it. Learn it. Remember it."
+              : "Sign in to your personal learning companion."}
+          </p>
+
+          <form onSubmit={submit} className="mt-8 space-y-4" aria-busy={busy}>
+            <fieldset disabled={busy} className="space-y-4">
+              {registering && (
+                <label className="block text-xs font-semibold uppercase tracking-wider text-muted">
+                  Name
+                  <input
+                    name="name"
+                    required
+                    maxLength={120}
+                    autoComplete="name"
+                    placeholder="Your name"
+                    className={inputStyle}
+                  />
+                </label>
+              )}
+              <label className="block text-xs font-semibold uppercase tracking-wider text-muted">
+                Email
                 <input
-                  name="name"
+                  name="email"
+                  type="email"
                   required
-                  maxLength={120}
-                  autoComplete="name"
+                  maxLength={255}
+                  autoComplete="email"
+                  placeholder="name@example.com"
                   className={inputStyle}
                 />
               </label>
-            )}
-            <label className="block text-sm font-medium">
-              Email
-              <input
-                name="email"
-                type="email"
-                required
-                maxLength={255}
-                autoComplete="email"
-                className={inputStyle}
-              />
-            </label>
-            <label className="block text-sm font-medium">
-              Password
-              <input
-                name="password"
-                type="password"
-                required
-                minLength={registering ? 12 : 1}
-                maxLength={128}
-                aria-describedby={registering ? "password-hint" : undefined}
-                autoComplete={registering ? "new-password" : "current-password"}
-                className={inputStyle}
-              />
-            </label>
-            {registering && (
-              <p id="password-hint" className="text-sm text-muted">
-                Use 12–128 characters.
-              </p>
-            )}
-            {error && (
-              <p role="alert" className="text-sm text-red-800">
-                {error}
-              </p>
-            )}
-            <Button type="submit" disabled={busy} className="w-full">
-              {busy
-                ? "Please wait…"
-                : registering
-                  ? "Create account"
-                  : "Log in"}
-            </Button>
-          </fieldset>
-        </form>
-        <p className="mt-6 text-sm text-muted">
-          {registering ? "Already have an account? " : "New to RecallLoop? "}
-          <Link
-            className="font-semibold text-forest underline"
-            href={registering ? "/login" : "/register"}
-          >
-            {registering ? "Log in" : "Create an account"}
-          </Link>
-        </p>
-      </main>
-    </Container>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-muted">
+                Password
+                <input
+                  name="password"
+                  type="password"
+                  required
+                  minLength={registering ? 12 : 1}
+                  maxLength={128}
+                  aria-describedby={registering ? "password-hint" : undefined}
+                  autoComplete={registering ? "new-password" : "current-password"}
+                  placeholder="••••••••••••"
+                  className={inputStyle}
+                />
+              </label>
+              {registering && (
+                <p id="password-hint" className="text-xs text-muted">
+                  Must be between 12 and 128 characters.
+                </p>
+              )}
+              {error && (
+                <div role="alert" className="rounded-xl bg-red-50 p-3 text-xs font-medium text-red-800 border border-red-200">
+                  <p>{error}</p>
+                </div>
+              )}
+              <div className="pt-2">
+                <Button type="submit" disabled={busy} className="w-full min-h-12 text-base font-semibold shadow-md">
+                  {busy
+                    ? "Please wait…"
+                    : registering
+                      ? "Create account"
+                      : "Log in"}
+                </Button>
+              </div>
+            </fieldset>
+          </form>
+
+          <div className="mt-8 border-t border-black/[0.06] pt-6 text-center text-xs text-muted">
+            {registering ? "Already have an account? " : "New to RecallLoop? "}
+            <Link
+              className="font-semibold text-forest underline underline-offset-4 hover:text-forest/80"
+              href={registering ? "/login" : "/register"}
+            >
+              {registering ? "Log in" : "Create an account"}
+            </Link>
+          </div>
+        </main>
+      </Container>
+    </div>
   );
 }
