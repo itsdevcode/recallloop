@@ -33,3 +33,7 @@ next-env.d.ts
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Browser test artifacts
+playwright-report/
+test-results/

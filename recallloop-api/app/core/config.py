@@ -1,9 +1,9 @@
 """Environment-based application configuration."""
 
 from functools import lru_cache
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, PostgresDsn
+from pydantic import BeforeValidator, Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -23,6 +23,46 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode, BeforeValidator(parse_origins)] = [
         "http://localhost:3000"
     ]
+
+    jwt_secret_key: SecretStr | None = Field(default=None, min_length=32)
+    jwt_algorithm: Literal["HS256"] = "HS256"
+    access_token_expire_minutes: int = Field(default=15, ge=1, le=15)
+    frontend_origin: str = "http://localhost:3000"
+    auth_cookie_name: str = "recallloop_session"
+    auth_cookie_secure: bool = False
+    auth_cookie_samesite: Literal["lax", "strict"] = "lax"
+    auth_cookie_path: str = "/"
+
+    @model_validator(mode="after")
+    def validate_auth_configuration(self) -> "Settings":
+        from urllib.parse import urlsplit
+
+        origin = urlsplit(self.frontend_origin)
+        if (
+            origin.scheme not in {"http", "https"}
+            or not origin.netloc
+            or origin.path
+            or origin.query
+            or origin.fragment
+            or origin.username
+        ):
+            raise ValueError("FRONTEND_ORIGIN must be an explicit HTTP(S) origin without a path")
+        if "*" in self.cors_origins:
+            raise ValueError("CORS_ORIGINS must contain explicit origins")
+        if self.auth_cookie_path != "/":
+            raise ValueError("AUTH_COOKIE_PATH must be / for the same-origin proxy")
+        if self.app_env == "production":
+            if not self.auth_cookie_secure or origin.scheme != "https":
+                raise ValueError("Production requires secure cookies and an HTTPS frontend origin")
+            if self.jwt_secret_key is None:
+                raise ValueError("Production requires JWT_SECRET_KEY")
+        return self
+
+    @property
+    def signing_key(self) -> str:
+        if self.jwt_secret_key is None:
+            raise RuntimeError("JWT_SECRET_KEY is required for authentication")
+        return self.jwt_secret_key.get_secret_value()
 
     @property
     def async_database_url(self) -> str:

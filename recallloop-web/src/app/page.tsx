@@ -1,4 +1,4 @@
-import { Button } from "@/components/button";
+import Link from "next/link";
 import { Container } from "@/components/container";
 
 export default function Home() {
@@ -6,7 +6,9 @@ export default function Home() {
     <div className="flex min-h-svh flex-col">
       <header className="py-7 sm:py-9">
         <Container>
-          <span className="text-lg font-semibold tracking-tight">RecallLoop</span>
+          <span className="text-lg font-semibold tracking-tight">
+            RecallLoop
+          </span>
         </Container>
       </header>
       <main className="flex flex-1 items-center py-16 sm:py-24">
@@ -21,12 +23,18 @@ export default function Home() {
               Remember it.
             </h1>
             <p className="mt-7 max-w-xl text-lg leading-relaxed text-muted sm:text-xl">
-              Turn saved articles into personalized recall cards and remember what matters.
+              Turn saved articles into personalized recall cards and remember
+              what matters.
             </p>
             <div className="mt-9">
-              <Button disabled aria-describedby="launch-note">Get Started</Button>
+              <Link
+                href="/register"
+                className="inline-flex min-h-12 items-center rounded-full bg-forest px-7 py-3 font-semibold text-ivory focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-forest"
+              >
+                Get Started
+              </Link>
               <p id="launch-note" className="mt-3 text-sm text-muted">
-                Coming soon. Your next chapter in learning.
+                Your next chapter in learning.
               </p>
             </div>
           </div>
@@ -34,7 +42,9 @@ export default function Home() {
       </main>
       <footer className="py-7">
         <Container>
-          <p className="text-sm text-muted">RecallLoop · Save it. Learn it. Remember it.</p>
+          <p className="text-sm text-muted">
+            RecallLoop · Save it. Learn it. Remember it.
+          </p>
         </Container>
       </footer>
     </div>
