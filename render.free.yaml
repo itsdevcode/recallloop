@@ -1,0 +1,80 @@
+# Configuration only. Zero-paid-resource demonstration deployment.
+# Do not apply until the operator reviews free-tier limitations in docs/free-deployment.md.
+previews:
+  generation: "off"
+projects:
+  - name: recallloop-free
+    environments:
+      - name: demo
+        services:
+          - type: web
+            name: recallloop-web
+            runtime: node
+            region: oregon
+            plan: free
+            rootDir: recallloop-web
+            autoDeployTrigger: "off"
+            buildCommand: npm ci && npm run build
+            startCommand: npm start -- --hostname 0.0.0.0 --port $PORT
+            healthCheckPath: /
+            envVars:
+              - key: NODE_VERSION
+                value: 24.21.0
+              - key: API_INTERNAL_URL
+                sync: false
+          - type: web
+            name: recallloop-api
+            runtime: python
+            region: oregon
+            plan: free
+            rootDir: recallloop-api
+            autoDeployTrigger: "off"
+            buildCommand: pip install uv==0.12.7 && uv sync --frozen --no-dev
+            startCommand: uv run --no-sync python scripts/start_free.py
+            healthCheckPath: /api/v1/health
+            envVars:
+              - key: PYTHON_VERSION
+                value: 3.12.12
+              - key: APP_ENV
+                value: production
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: recallloop-db
+                  property: connectionString
+              - key: JWT_SECRET_KEY
+                generateValue: true
+              - key: FRONTEND_ORIGIN
+                sync: false
+              - key: CORS_ORIGINS
+                sync: false
+              - key: AUTH_COOKIE_SECURE
+                value: "true"
+              - key: GEMINI_API_KEY
+                sync: false
+              - key: GEMMA_MODEL
+                value: gemma-4-26b-a4b-it
+              - key: CELERY_BROKER_URL
+                fromService:
+                  name: recallloop-broker
+                  type: keyvalue
+                  property: connectionString
+              - key: DB_POOL_SIZE
+                value: "2"
+              - key: DB_MAX_OVERFLOW
+                value: "2"
+              - key: PROCESSING_REQUESTS_PER_DAY
+                value: "10"
+          - type: keyvalue
+            name: recallloop-broker
+            region: oregon
+            plan: free
+            maxmemoryPolicy: noeviction
+            ipAllowList: []
+        databases:
+          - name: recallloop-db
+            region: oregon
+            plan: free
+            postgresMajorVersion: "16"
+            databaseName: recallloop
+            user: recallloop
+            ipAllowList: []
