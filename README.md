@@ -688,17 +688,27 @@ makes exactly one provider request. Deterministic tests always mock provider I/O
 
 ## Screenshots and release evidence
 
-Real local-browser captures from the production Next.js build are included below.
-The dashboard account is a disposable test fixture. These are UI evidence, not a
-live deployment or successful live Gemma inference claim.
+Fresh captures of the latest interface from the local production Next.js build:
+1440px desktop and 390px mobile. The dashboard account is a disposable test fixture.
+These show the real UI, not a live deployment or verified live Gemma inference.
+
+**Landing page · desktop**
 
 ![RecallLoop desktop landing page](docs/screenshots/landing-desktop.png)
 
 <details>
-<summary>Mobile landing and personal workspace</summary>
+<summary>Mobile landing, dashboard, and recall session</summary>
+
+**Landing page · mobile**
 
 ![RecallLoop mobile landing page](docs/screenshots/landing-mobile.png)
+
+**Personal learning workspace**
+
 ![RecallLoop personal learning workspace](docs/screenshots/dashboard-desktop.png)
+
+**Recall session · answer reveal and rating**
+
 ![RecallLoop answer reveal and rating](docs/screenshots/recall-desktop.png)
 
 </details>
