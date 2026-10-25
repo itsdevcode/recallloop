@@ -158,7 +158,7 @@ Never commit real `.env` files or secrets. Backend settings:
 | `GEMINI_API_KEY` | Google AI Studio key; server/worker only, no default |
 | `GEMMA_MODEL` | `gemma-4-26b-a4b-it`; no silent model substitution |
 | `CELERY_BROKER_URL` | `redis://localhost:6379/0`; use Render's internal Key Value URL there |
-| `PROCESSING_REQUESTS_PER_DAY` | `10` create/retry submissions per user per rolling 24h; range 1–100 |
+| `PROCESSING_REQUESTS_PER_DAY` | `10` create/retry submissions per user per 24h quota window; range 1–100 |
 | `TEST_DATABASE_URL` | Test runner only; explicit separate local database ending in `_test` |
 | `TEST_CELERY_BROKER_URL` | Browser tests only; separate local Redis database, never database 0 |
 
@@ -357,8 +357,8 @@ uv run python -m app.workers.reconcile
 ```
 
 A persistent per-user `processing_budgets` row serializes quota usage across API
-instances. By default ten create/manual-retry submissions are permitted in a rolling
-24-hour window. The counter survives article deletion, so deleting/re-saving cannot
+instances. By default ten create/manual-retry submissions are permitted per 24-hour quota window. A window starts with a persisted submission
+and resets on the first submission after it expires; it is not a sliding event log. The counter survives article deletion, so deleting/re-saving cannot
 bypass it. Automatic retries do not consume new submission slots but remain capped
 by the article attempt count. Failed queue publications consume a slot conservatively.
 There is no cross-user billing or review scheduling in this implementation.
