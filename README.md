@@ -17,22 +17,24 @@ Implemented:
 - Fifteen-minute HS256 JWTs transported only in an HttpOnly cookie.
 - Same-origin API proxies, CSRF protection, registration/login pages, and a protected dashboard.
 - Per-user article saving, paginated library, readable text details, and confirmed deletion.
-- Bounded, SSRF-protected public HTML fetching and Trafilatura extraction.
+- Bounded, SSRF-protected public HTML fetching and Trafilatura extraction in Celery.
+- Hosted Gemma concepts and recall questions/answers with source evidence and validation.
+- PostgreSQL job leases, bounded retries, per-user quotas, and recovery after queue loss.
 - Dashboard quick-add, saved count, and recent articles. Get Started links to registration.
 - Async SQLAlchemy sessions, Alembic migration, configurable settings and CORS.
 - Backend security/integration tests and real-browser auth/library tests.
 
-Planned MVP features include concept/question generation with an open-weight
-Gemma model, recall ratings (Forgot, Hard, Easy), and spaced repetition. These planned features, Celery, Valkey,
-social login, email verification, password recovery, refresh tokens, and cloud
+Planned PR #5 features include recall ratings (Forgot, Hard, Easy), daily reviews,
+and spaced repetition. These planned features, social login, email verification, password recovery, refresh tokens, and cloud
 resources are not implemented in this PR.
 
 ## Stack and structure
 
 Python 3.12+, FastAPI, Pydantic v2, PostgreSQL 13+, async SQLAlchemy 2.0, asyncpg,
 Alembic, pwdlib/Argon2, PyJWT, Next.js App Router, TypeScript, and Tailwind CSS.
-Extraction uses aiohttp and Trafilatura. Checks use Pytest, Ruff, ESLint, TypeScript,
-and Playwright. The bounded parser subprocess requires Linux (Ubuntu/Render).
+Extraction uses aiohttp and Trafilatura; background processing uses Celery with
+Redis-compatible Valkey, and hosted AI uses the Google GenAI Python SDK. Checks
+use Pytest, Ruff, ESLint, TypeScript, and Playwright. The bounded parser subprocess requires Linux (Ubuntu/Render).
 
 ```text
 recallloop-api/
@@ -43,9 +45,11 @@ recallloop-api/
     db/                     # Shared Base and async sessions
     models/                 # User and Article typed models
     schemas/                # Validated auth/article inputs and safe public responses
-    services/               # Authentication, article ownership, safe fetch and extraction
+    services/               # Auth, articles, queue publishing, and leased processing
+    ai/                     # Gemma SDK client, prompts, and validated output
+    workers/                # Celery tasks and automatic/manual reconciliation
     dependencies/auth.py    # Cookie authentication and CSRF checks
-  alembic/                  # Registered metadata; 0001 users, 0002 articles
+  alembic/                  # Registered metadata; 0001 users, 0002 articles, 0003 learning/jobs
   tests/                    # Health, configuration and PostgreSQL integration
   pyproject.toml
   uv.lock
@@ -121,7 +125,7 @@ npm run dev
 ```
 
 Open <http://localhost:3000/register>, create an account, log in, and use Log out on
-`/dashboard`. Registration does not automatically log in. Passwords must contain
+`/dashboard`. Start the broker and worker below before saving articles. Registration does not automatically log in. Passwords must contain
 12–128 characters; names are trimmed and limited to 120 characters, and emails
 are trimmed, validated, lowercased, and limited to 255 characters.
 
@@ -151,7 +155,12 @@ Never commit real `.env` files or secrets. Backend settings:
 | `AUTH_COOKIE_SECURE` | `false` locally; must be `true` in production |
 | `AUTH_COOKIE_SAMESITE` | `lax`; `strict` also supported |
 | `AUTH_COOKIE_PATH` | `/`; required for proxy cookie forwarding |
+| `GEMINI_API_KEY` | Google AI Studio key; server/worker only, no default |
+| `GEMMA_MODEL` | `gemma-4-26b-a4b-it`; no silent model substitution |
+| `CELERY_BROKER_URL` | `redis://localhost:6379/0`; use Render's internal Key Value URL there |
+| `PROCESSING_REQUESTS_PER_DAY` | `10` create/retry submissions per user per rolling 24h; range 1–100 |
 | `TEST_DATABASE_URL` | Test runner only; explicit separate local database ending in `_test` |
+| `TEST_CELERY_BROKER_URL` | Browser tests only; separate local Redis database, never database 0 |
 
 Frontend `API_INTERNAL_URL` is the **server-only** FastAPI origin, defaulting to
 `http://127.0.0.1:8000`. Browser requests use relative `/api/auth/...` and `/api/articles` URLs. `NEXT_PUBLIC_API_URL` remains available for future non-auth API clients;
@@ -228,14 +237,21 @@ Next.js proxy equivalents under `/api/articles`.
 
 | Endpoint | Behavior |
 | --- | --- |
-| `POST /api/v1/articles` | JSON `{"url":"https://example.com/article"}`; 201 with metadata/status |
+| `POST /api/v1/articles` | JSON `{"url":"https://example.com/article"}`; 202 with PENDING metadata after commit/enqueue |
 | `GET /api/v1/articles` | Own articles, newest first; `limit` 1–100, `offset` ≥0, optional `status` |
 | `GET /api/v1/articles/{id}` | Own article metadata plus extracted `content` |
 | `DELETE /api/v1/articles/{id}` | Owner only; 204, with CSRF protection |
+| `GET /api/v1/articles/{id}/concepts` | Own concepts/cards when READY; `[]` while pending/processing/failed |
+| `POST /api/v1/articles/{id}/retry` | Owner-only FAILED retry; 202, CSRF required, bounded attempts/quota |
+
+Queue publication failure returns 503 with a safe message and leaves a saved FAILED
+entry for owner retry. Duplicate URLs still return 409; invalid URLs return 422,
+and exhausted user quota returns 429. Non-FAILED/exhausted retries return 409.
 
 The list response contains `items`, `total`, `limit`, and `offset`. Summaries include
 id, URL, title, source/domain, excerpt, status, safe error message, and UTC timestamps;
-full content is neither loaded nor returned in list responses. Missing and foreign-owned
+full content is neither loaded nor returned in list responses. Responses also expose
+processing attempt count, model attribution, and a long-article coverage note. Missing and foreign-owned
 IDs both return 404. Every database query is scoped to the authenticated owner.
 Migration `0002` adds the article foreign key, status check, per-user canonical URL
 unique constraint, and indexes for owner/newest and owner/status queries. Different
@@ -249,29 +265,132 @@ to 2048 encoded bytes. Redirect destinations and publisher-provided canonical ta
 are not used as deduplication keys: two different submitted URLs can reach the same
 article. Title remains null when unavailable; readable content is never invented.
 
-### Extraction behavior and bounds
+### Processing and extraction bounds
 
-Saving waits for extraction. A single database transaction moves the article through
-PENDING/PROCESSING to READY or FAILED before the 201 response; transient statuses
-are reserved for future worker integration. A failed download/extraction still saves
-a FAILED entry with a safe message, whereas invalid/unsafe URL syntax returns 422
-without creating a record. Delete a FAILED entry and save it again to retry extraction.
-A crash or cancelled request rolls back an unfinished creation rather than leaving
-an orphaned PROCESSING record. There are no fire-and-forget jobs or Celery workers.
+Saving commits a PENDING article and publishes only its UUID to Celery, then returns
+202. The form is released immediately after submission. Visible library/detail pages
+poll every three seconds while jobs are active, stop on READY/FAILED, and pause after
+100 polling requests until manually refreshed. Hidden tabs do not poll; leaving a
+page cancels its polling timer. Failed entries offer Retry processing while attempts
+remain. New detail pages show the concepts, supporting passages, questions, and
+reveal-answer controls; daily review scheduling is explicitly reserved for PR #5.
 
-- Only public HTTP(S) HTML/XHTML articles on standard ports 80/443 are supported.
-- Maximum three redirects; every target is validated independently.
-- Maximum 1 MiB HTML body, checked against both Content-Length and streamed bytes.
-- Compressed responses are rejected; the client requests identity encoding, preventing
-  decompression bombs. Sites that ignore this request are currently unsupported.
-- Connect/read timeout: 3 seconds each; each hop has a 10-second total timeout,
-  and DNS plus the entire redirect/download chain has a 12-second deadline.
-- At most four concurrent extractions per API process, with a 20-second bound
-  including waiting for an extraction slot, fetching, and parsing.
-- Trafilatura runs in an awaited subprocess with a 5-second wall deadline, a
-  3-second CPU limit, and a 512 MiB address-space limit; timeouts kill/reap the child.
-  It only parses already fetched bytes. Meaningful text requires 200 characters
-  and 30 words. Comments and tables are excluded.
+The worker claims a 180-second, randomly fenced lease in a short transaction. It then
+closes the session, securely extracts content, saves that content in another short
+transaction, invokes Gemma outside any database transaction, and atomically replaces
+concepts/cards and marks READY. If AI fails, extracted content remains available and
+later attempts reuse it. Duplicate deliveries cannot claim a live lease; an expired
+worker cannot write after another worker takes its lease. Deleting an article during
+processing prevents a later worker from recreating it.
+
+- Only public HTTP(S) HTML/XHTML on standard ports 80/443; at most three redirects.
+- Maximum 1 MiB body, checked via Content-Length and streamed bytes. Identity
+  encoding is requested; compressed responses are conservatively rejected.
+- Three-second connect/read timeouts, ten seconds per hop, and twelve seconds
+  across DNS and the complete redirect/download chain.
+- Trafilatura parses fetched bytes in an awaited subprocess: five-second wall,
+  three-second CPU, 512 MiB address-space limits. Timed-out children are killed/reaped.
+  At least 200 characters and 30 words of readable text are required.
+- The worker pipeline has a 95-second deadline; Celery soft/hard limits are 105/120
+  seconds, below the 180-second lease/Redis visibility timeout. Concurrency and
+  prefetch are one by default. Each task creates/disposes its own NullPool async
+  engine/event loop; no database connection is created at module import.
+
+### Gemma generation and disclosure
+
+Production uses Google's hosted **`gemma-4-26b-a4b-it`** through `google-genai`,
+not Gemini Flash, OpenAI, or a fallback model. Obtain `GEMINI_API_KEY` from Google
+AI Studio. The SDK's installed async API was inspected during implementation.
+See [Google's hosted Gemma guide](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api).
+
+AI reads the extracted text, identifies key ideas, writes understanding questions,
+and drafts source-grounded answers. Up to three concepts are requested, with one
+question/answer each; one or two are allowed when reliable material is limited.
+Article text is sent to Google for this processing. Treat generated material as a
+learning aid and check its evidence, especially for consequential claims.
+
+Inputs are limited to 12,000 characters. Longer articles use deterministic beginning,
+middle, and ending passages; the stored/displayed coverage note discloses omissions.
+The full extracted text is retained in PostgreSQL. Untrusted article content is
+quoted separately from application system instructions. No model tools, automatic
+function execution, or SDK automatic continuation are enabled. Keys, cookies and
+other user articles are not included in prompts; model text never chooses task
+UUIDs, outbound URLs or database operations.
+
+The adapter uses prompt-based JSON rather than assuming provider-enforced structured
+output is supported identically across hosted Gemma/SDK versions. Pydantic validates
+1–3 concepts, exact required fields, nonempty bounded text, duplicate titles/questions,
+and verbatim evidence (whitespace normalized) in both the selected input and full
+article. Invalid JSON/evidence receives one regeneration attempt; there is no repair
+loop or model fallback. Each SDK request has a 30-second timeout and one transport
+attempt, with a 65-second overall generation budget. Schema/excerpt validation does
+not mathematically prove semantic entailment or factual quality; prompt injection
+can still affect draft quality, but it cannot invoke tools or application actions.
+
+Gemma 4 is developed by **Google DeepMind** and released under **Apache 2.0**;
+see its [model card and license](https://ai.google.dev/gemma/docs/core/model_card_4).
+RecallLoop does not distribute model weights. The repository's MIT license applies
+to RecallLoop code, independently of model/provider terms.
+
+### Queue reliability, recovery and abuse limits
+
+PostgreSQL is the source of truth; Redis/Valkey is only the broker. No Celery result
+backend is configured. Tasks/results accept JSON only, use late acknowledgment and
+worker-loss redelivery, and carry only article UUIDs. Temporary website/provider
+network failures and provider 429/5xx failures use two bounded retries (5s, 10s
+backoff), with a total of three claimed attempts per article, including manual
+retries and crash recovery. Each attempt can make at most two provider calls when
+repair is necessary. Permanent extraction/output errors become FAILED; failure
+messages never include raw provider/network responses or article bodies.
+
+Each worker includes a lifecycle-managed reconciliation timer every 60 seconds,
+without Celery Beat. It requeues PENDING records stale for 180 seconds and expired
+PROCESSING leases, in batches of 100, after committing short row-lock transactions.
+Publication is timestamp-fenced; duplicate publication remains safe. Exhausted jobs
+become FAILED instead of looping. After losing a queue or killing a worker, recovery
+normally starts within the stale/lease interval plus the next timer tick once the
+broker/database/worker are available. Recovery can also be run explicitly:
+
+```bash
+cd recallloop-api
+uv run python -m app.workers.reconcile
+```
+
+A persistent per-user `processing_budgets` row serializes quota usage across API
+instances. By default ten create/manual-retry submissions are permitted in a rolling
+24-hour window. The counter survives article deletion, so deleting/re-saving cannot
+bypass it. Automatic retries do not consume new submission slots but remain capped
+by the article attempt count. Failed queue publications consume a slot conservatively.
+There is no cross-user billing or review scheduling in this implementation.
+
+### Local broker and worker
+
+On Ubuntu, Redis is a compatible local alternative to Valkey:
+
+```bash
+sudo apt install redis-server
+sudo systemctl start redis-server
+redis-cli ping
+```
+
+Configure `.env` with the broker URL and Google AI Studio key, then run from
+`recallloop-api` in a separate terminal:
+
+```bash
+uv sync --locked --extra dev
+uv run alembic upgrade head
+uv run celery -A app.workers.celery_app:celery_app worker --loglevel=info --concurrency=1
+```
+
+Keep the API, web app and worker running. Migration `0003` adds `concepts`,
+`recall_cards`, per-user budgets, article attempts/leases/recovery timestamps, and
+model/coverage fields. Article deletion cascades through concepts to cards. Concept
+positions are unique per article, and successful results are replaced atomically.
+No authentication columns change. Existing PR #3 READY articles are moved to PENDING
+while retaining their extracted text; reconciliation queues their AI generation.
+Downgrading to `0002` removes learning/job tables and restores extraction-era status
+meaning while preserving articles, content and users. Use downgrades only on disposable
+or deliberately backed-up data; generated learning material is removed.
 
 ### SSRF security and current limitations
 
@@ -293,7 +412,8 @@ This is a conservative bounded HTML reader, not a browser: JavaScript-only pages
 paywalls, PDFs, large/compressed pages, and blocked sites may fail. Respect site
 terms and access restrictions. A per-process concurrency bound is not distributed
 abuse protection; deployment-level request controls and outbound network restrictions
-remain useful defense in depth. No AI, recall cards, workers, or Valkey are installed.
+remain useful defense in depth. There is no JavaScript browser extraction, distributed inference scheduling, or
+spaced-repetition algorithm in this PR.
 
 ## Migrations and tests
 
@@ -353,44 +473,77 @@ npm run typecheck
 npm run build
 # Once per machine (Ubuntu may require OS packages via install-deps):
 npx playwright install --with-deps chromium
-# With TEST_DATABASE_URL still exported and migrated by the backend suite:
+# Isolated local test Redis; does not alter the development broker:
+redis-server --bind 127.0.0.1 --port 56379 --save '' --appendonly no
+# In another terminal, with TEST_DATABASE_URL still exported and migrated:
+export TEST_CELERY_BROKER_URL='redis://127.0.0.1:56379/13'
 npm run test:e2e
 ```
 
-Browser tests start their own API and production web server on ports 18000 and
-13000 with a generated test signing key. They preserve auth coverage and exercise
-the mobile library through the real proxy/API/PostgreSQL stack: empty state,
-adding, details, duplicate errors, list retry, failure status, and confirmed deletion.
-The test-only `tests.browser_app` entry point supplies fixed HTML for fixture URLs
-on `example.com`; it never fetches live websites. The production app has no network
-bypass or fixture flag. A transient list outage is mocked in the browser. Test
-accounts remain in the disposable database until the next backend test cleanup.
+Browser tests start API/production web servers on ports 18000/13000 and a real
+Celery prefork worker using the explicit isolated test broker. Only website/provider
+I/O is replaced by `tests.browser_worker` fixtures; production has no mock flag or
+fallback output. The real worker calls the real Gemma adapter against a mocked SDK
+response, validates it, and persists results in PostgreSQL. Browser coverage includes
+PENDING/PROCESSING/READY, failed-job retry, concepts/reveal-answer, mobile library
+CRUD, and existing authentication. One PENDING snapshot and a transient list outage
+are browser mocks for deterministic UI assertions. Test accounts remain in the
+disposable database until the next backend cleanup. Do not run backend destructive
+tests alongside browser/worker tests using the same database.
 `npm start` serves the production app on port 3000 after a build.
 
-## Planned Render deployment
+## Render deployment preparation
 
-No cloud resources are created by this PR. Run FastAPI and Next.js as web services:
+No cloud resources are provisioned or deployed by this PR. The intended deployment
+has five resources: Next.js web service, FastAPI web service, PostgreSQL, Render Key
+Value/Valkey, and a **paid Render Background Worker**. Use the same workspace/region
+for private communication. Follow the [worker guide](https://render.com/docs/background-workers)
+and [Key Value guide](https://render.com/docs/key-value).
 
-- API root `recallloop-api`; install the Python package and run
-  `uvicorn app.main:app --host 0.0.0.0 --port "$PORT"`. Configure the managed
-  PostgreSQL URL with the asyncpg scheme and apply `alembic upgrade head` in the
-  deployment migration step.
-- Web root `recallloop-web`; build with `npm ci && npm run build` and run
-  `npm start -- --hostname 0.0.0.0 --port "$PORT"`. Set `API_INTERNAL_URL` to the
-  trusted API service origin, using Render's private network where appropriate.
-- On the API, set `APP_ENV=production`, a generated `JWT_SECRET_KEY`,
-  `AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAMESITE=lax`, and
-  `FRONTEND_ORIGIN=https://YOUR-WEB-SERVICE.onrender.com`. Set `CORS_ORIGINS` to
-  that explicit origin, never `*`.
+- API root `recallloop-api`: build `pip install .`; start
+  `uvicorn app.main:app --host 0.0.0.0 --port "$PORT"`. Apply `alembic upgrade head`
+  in the deployment migration step before starting the new API/worker version.
+- Worker root `recallloop-api`: build `pip install .`; start
+  `celery -A app.workers.celery_app:celery_app worker --loglevel=info --concurrency=1`.
+  It needs no inbound port or HTTP health check. Celery SIGTERM starts warm shutdown;
+  set `maxShutdownDelaySeconds: 150` to let bounded jobs complete before SIGKILL.
+  Interrupted jobs recover through leases/reconciliation.
+- API and worker share `DATABASE_URL`, `CELERY_BROKER_URL`, `GEMINI_API_KEY`, and
+  `GEMMA_MODEL`. Use PostgreSQL's asyncpg URL and the **internal** Key Value URL
+  (`redis://...`, or authenticated internal URL if configured). Never expose broker
+  credentials, database URLs, or the Google key through `NEXT_PUBLIC_` variables.
+- Set Key Value eviction to `noeviction`. **Free Key Value is not durable**: all
+  queue data is lost on restart/upgrade. Database recovery is required even with a
+  paid durable broker because publishing and database commits are not atomic.
+- Web root `recallloop-web`: build `npm ci && npm run build`; start
+  `npm start -- --hostname 0.0.0.0 --port "$PORT"`. Set server-only
+  `API_INTERNAL_URL` to the trusted API service origin.
+- API auth: `APP_ENV=production`, generated `JWT_SECRET_KEY`,
+  `AUTH_COOKIE_SECURE=true`, `AUTH_COOKIE_SAMESITE=lax`, exact HTTPS
+  `FRONTEND_ORIGIN`, and matching explicit `CORS_ORIGINS` (never `*`). Configure the
+  shared production settings on the worker too if using `APP_ENV=production` there.
 
-The browser talks only to the web origin's `/api/auth/...` and `/api/articles/...`; Next.js forwards to
-FastAPI server-to-server and returns the host-only Set-Cookie to the browser.
-The cookie therefore belongs to the **web** domain even when the API is on a
-separate `onrender.com` domain. This avoids third-party cookies and does not
-require `SameSite=None` or a shared cookie Domain. A custom web domain works the
-same way after updating `FRONTEND_ORIGIN` and CORS. Keep the upstream URL under
-server configuration control and use HTTPS for public service communication.
-Health remains a liveness check, not database readiness.
+The browser uses only the web origin's `/api/auth/...` and `/api/articles/...`;
+Next.js forwards cookies/security headers only to allowlisted API paths and returns
+host-only cookies for the web domain. Separate Render domains do not require
+third-party cookies, `SameSite=None`, or a shared cookie Domain. Deployment-level
+abuse controls and outbound restrictions remain defense in depth. Production Render
+memory/performance and live provider access must be verified during deployment;
+local real-broker tests use Redis 7, not a provisioned Render Valkey instance.
+
+### Live Gemma smoke test
+
+No live inference is claimed without an actual API key. With a valid key in the
+API directory's `.env`, run the optional short, single-call smoke test:
+
+```bash
+cd recallloop-api
+uv run python -m app.ai.smoke
+```
+
+It reports only model ID, elapsed time, success/failure category and concept count,
+never the key, article body or raw provider error. The smoke bypasses repair so it
+makes exactly one provider request. Deterministic tests always mock provider I/O.
 
 ## License
 

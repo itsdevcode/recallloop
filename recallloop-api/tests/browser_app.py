@@ -16,11 +16,15 @@ if os.environ.get("DATABASE_URL") != url:
     raise RuntimeError("Browser tests must use their explicit disposable database")
 
 
+_failed_once: set[str] = set()
+
+
 async def fixture_html(value: str) -> bytes:
     parsed = urlsplit(value)
     if parsed.hostname != "example.com" or not parsed.path.startswith("/browser-"):
         raise ExtractionError("Browser tests permit only fixture article URLs.")
-    if parsed.path.startswith("/browser-failed"):
+    if parsed.path.startswith("/browser-failed") and value not in _failed_once:
+        _failed_once.add(value)
         raise ExtractionError("The fixture website could not be accessed.")
     return HTML
 

@@ -73,7 +73,9 @@ async def client(database_url):
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         async with app.state.db_engine.begin() as connection:
-            await connection.execute(text("TRUNCATE TABLE articles, users"))
+            await connection.execute(
+                text("TRUNCATE TABLE recall_cards, concepts, processing_budgets, articles, users")
+            )
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url=ORIGIN,
@@ -81,4 +83,26 @@ async def client(database_url):
         ) as http_client:
             yield http_client, app
         async with app.state.db_engine.begin() as connection:
-            await connection.execute(text("TRUNCATE TABLE articles, users"))
+            await connection.execute(
+                text("TRUNCATE TABLE recall_cards, concepts, processing_budgets, articles, users")
+            )
+
+
+@pytest_asyncio.fixture
+async def signed_in(client, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from app.services import article_processing, extraction, queue
+    from tests.learning_fixtures import learning_result
+    from tests.test_auth import login, register
+    from tests.test_public_web import HTML
+
+    http, app = client
+    await register(http)
+    await login(http)
+    monkeypatch.setattr(extraction, "fetch_public_html", AsyncMock(return_value=HTML))
+    monkeypatch.setattr(queue, "enqueue_article", AsyncMock())
+    monkeypatch.setattr(
+        article_processing, "generate_learning", AsyncMock(return_value=learning_result())
+    )
+    return http, app

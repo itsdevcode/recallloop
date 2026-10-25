@@ -1,28 +1,18 @@
 import asyncio
 from unittest.mock import AsyncMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.services import extraction
+from app.services import article_processing, extraction
 from app.services.public_web import ExtractionError
 from tests.conftest import migrate
 from tests.test_auth import login, register
-from tests.test_public_web import HTML
 
 pytestmark = pytest.mark.asyncio
 URL = "https://example.com/learning"
-
-
-@pytest_asyncio.fixture
-async def signed_in(client, monkeypatch):
-    http, app = client
-    await register(http)
-    await login(http)
-    monkeypatch.setattr(extraction, "fetch_public_html", AsyncMock(return_value=HTML))
-    return http, app
 
 
 async def save(http, url=URL):
@@ -30,13 +20,16 @@ async def save(http, url=URL):
 
 
 async def test_create_detail_list_and_delete(signed_in):
-    http, _ = signed_in
+    http, app = signed_in
     response = await save(http)
-    assert response.status_code == 201
+    assert response.status_code == 202
     article = response.json()
+    assert article["status"] == "PENDING"
+    await run_processing(app, article["id"])
+    article = (await http.get(f"/api/v1/articles/{article['id']}")).json()
     assert article["status"] == "READY"
     assert article["title"] == "Learning that lasts"
-    assert "content" not in article and "user_id" not in article
+    assert "content" not in response.json() and "user_id" not in article
     assert response.headers["cache-control"] == "no-store"
     detail = await http.get(f"/api/v1/articles/{article['id']}")
     assert "Active recall" in detail.json()["content"]
@@ -79,14 +72,14 @@ async def test_invalid_url_rejected(signed_in, url):
 
 async def test_duplicates_and_canonicalization(signed_in):
     http, _ = signed_in
-    assert (await save(http, "https://EXAMPLE.com:443/learning#chapter")).status_code == 201
+    assert (await save(http, "https://EXAMPLE.com:443/learning#chapter")).status_code == 202
     assert (await save(http)).status_code == 409
 
 
 async def test_concurrent_duplicate_registration(signed_in):
     http, _ = signed_in
     responses = await asyncio.gather(save(http), save(http))
-    assert sorted(response.status_code for response in responses) == [201, 409]
+    assert sorted(response.status_code for response in responses) == [202, 409]
 
 
 async def test_ownership_and_same_url_for_other_user(signed_in):
@@ -98,17 +91,18 @@ async def test_ownership_and_same_url_for_other_user(signed_in):
     assert (await http.get("/api/v1/articles")).json()["total"] == 0
     assert (await http.get(f"/api/v1/articles/{first['id']}")).status_code == 404
     assert (await http.delete(f"/api/v1/articles/{first['id']}")).status_code == 404
-    assert (await save(http)).status_code == 201
+    assert (await save(http)).status_code == 202
     http.cookies.clear()
     await login(http)
     assert (await http.get(f"/api/v1/articles/{first['id']}")).status_code == 200
 
 
 async def test_pagination_and_status_filter(signed_in):
-    http, _ = signed_in
+    http, app = signed_in
     ids = []
     for i in range(3):
         ids.append((await save(http, URL + str(i))).json()["id"])
+        await run_processing(app, ids[-1])
     page = (await http.get("/api/v1/articles?limit=2&offset=0&status=READY")).json()
     assert page["total"] == 3
     assert [article["id"] for article in page["items"]] == ids[::-1][:2]
@@ -119,14 +113,16 @@ async def test_pagination_and_status_filter(signed_in):
 
 
 async def test_extraction_failure_is_safe_and_persisted(signed_in, monkeypatch):
-    http, _ = signed_in
+    http, app = signed_in
     monkeypatch.setattr(
         extraction,
         "fetch_public_html",
         AsyncMock(side_effect=ExtractionError("The website could not be accessed.")),
     )
     response = await save(http)
-    assert response.status_code == 201
+    assert response.status_code == 202
+    await run_processing(app, response.json()["id"])
+    response = await http.get(f"/api/v1/articles/{response.json()['id']}")
     assert response.json()["status"] == "FAILED"
     assert response.json()["error_message"] == "The website could not be accessed."
     detail = (await http.get(f"/api/v1/articles/{response.json()['id']}")).json()
@@ -163,3 +159,11 @@ async def test_article_migration_preserves_users(signed_in, database_url):
         ).all() == original_users
     await asyncio.to_thread(migrate, database_url, "upgrade", "head")
     await asyncio.to_thread(migrate, database_url, "check")
+
+
+async def run_processing(app, identifier):
+    return await article_processing.process_article(
+        UUID(identifier),
+        async_sessionmaker(app.state.db_engine, expire_on_commit=False),
+        app.state.settings,
+    )

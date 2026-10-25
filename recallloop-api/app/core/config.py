@@ -6,6 +6,9 @@ from typing import Annotated, Literal
 from pydantic import BeforeValidator, Field, PostgresDsn, SecretStr, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
+MAX_ATTEMPTS = 3
+LEASE_SECONDS = 180
+
 
 def parse_origins(value: object) -> object:
     if isinstance(value, str):
@@ -32,6 +35,11 @@ class Settings(BaseSettings):
     auth_cookie_secure: bool = False
     auth_cookie_samesite: Literal["lax", "strict"] = "lax"
     auth_cookie_path: str = "/"
+
+    gemini_api_key: SecretStr | None = None
+    gemma_model: Literal["gemma-4-26b-a4b-it"] = "gemma-4-26b-a4b-it"
+    celery_broker_url: SecretStr = SecretStr("redis://localhost:6379/0")
+    processing_requests_per_day: int = Field(default=10, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_auth_configuration(self) -> "Settings":
