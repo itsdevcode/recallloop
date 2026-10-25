@@ -73,7 +73,7 @@ async def client(database_url):
     app = create_app(settings)
     async with app.router.lifespan_context(app):
         async with app.state.db_engine.begin() as connection:
-            await connection.execute(text("TRUNCATE TABLE users"))
+            await connection.execute(text("TRUNCATE TABLE articles, users"))
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app),
             base_url=ORIGIN,
@@ -81,4 +81,4 @@ async def client(database_url):
         ) as http_client:
             yield http_client, app
         async with app.state.db_engine.begin() as connection:
-            await connection.execute(text("TRUNCATE TABLE users"))
+            await connection.execute(text("TRUNCATE TABLE articles, users"))

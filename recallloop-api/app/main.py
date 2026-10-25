@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 
@@ -17,11 +18,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = (
-            create_async_engine(settings.async_database_url, pool_pre_ping=True)
+            create_async_engine(
+                settings.async_database_url, pool_pre_ping=True, hide_parameters=True
+            )
             if settings.database_url is not None
             else None
         )
         app.state.db_engine = engine
+        app.state.extraction_slots = asyncio.Semaphore(4)
         try:
             yield
         finally:
@@ -42,7 +46,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
         response = await call_next(request)
-        if request.url.path.startswith("/api/v1/auth/"):
+        if request.url.path.startswith(("/api/v1/auth/", "/api/v1/articles")):
             response.headers["Cache-Control"] = "no-store"
         return response
 
