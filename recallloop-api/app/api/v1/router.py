@@ -3,7 +3,10 @@ from typing import Literal
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from app.api.v1.endpoints.auth import router as auth_router
+
 router = APIRouter()
+router.include_router(auth_router)
 
 
 class HealthResponse(BaseModel):
