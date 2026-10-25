@@ -39,7 +39,7 @@ export default defineConfig({
   webServer: [
     {
       command:
-        "uv run --project ../recallloop-api uvicorn app.main:app --app-dir ../recallloop-api --host 127.0.0.1 --port 18000",
+        "uv run --project ../recallloop-api uvicorn tests.browser_app:app --app-dir ../recallloop-api --host 127.0.0.1 --port 18000",
       url: "http://127.0.0.1:18000/api/v1/health",
       env: {
         DATABASE_URL: databaseUrl,
