@@ -12,7 +12,10 @@ test("register, login, protected profile and logout through the same-origin prox
   await expect(page).toHaveURL(/\/login$/);
   await expect(page.getByText("Welcome,", { exact: false })).toHaveCount(0);
   await page.goto("/");
-  await page.getByRole("link", { name: "Get Started" }).click();
+  await page
+    .getByRole("link", { name: "Start Remembering", exact: false })
+    .first()
+    .click();
   await page.getByLabel("Name", { exact: true }).fill("Browser User");
   await page.getByLabel("Email", { exact: true }).fill(email);
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -22,7 +25,9 @@ test("register, login, protected profile and logout through the same-origin prox
   await page.getByLabel("Email", { exact: true }).fill(email.toUpperCase());
   await page.getByLabel("Password", { exact: true }).fill("WrongPassword123!");
   await page.getByRole("button", { name: "Log in", exact: true }).click();
-  await expect(page.getByRole("alert").filter({ hasText: "Invalid email or password" })).toHaveText("Invalid email or password");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Invalid email or password" }),
+  ).toHaveText("Invalid email or password");
   await page.getByLabel("Password", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Log in", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/);

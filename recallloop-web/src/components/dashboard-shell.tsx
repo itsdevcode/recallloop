@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { createContext, useContext, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { Button } from "@/components/button";
 import { Container } from "@/components/container";
 import { ApiError, authRequest, type PublicUser } from "@/lib/auth";
@@ -14,6 +14,7 @@ export function useUser() {
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState<PublicUser | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -47,7 +48,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
     }
   }
   return (
-    <Container className="py-8 sm:py-12">
+    <Container className="workspace py-8 sm:py-12">
       {!user ? (
         <div aria-live="polite">
           <p>{error || "Checking your session…"}</p>
@@ -70,7 +71,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               RecallLoop
             </Link>
             <nav
-              className="flex w-full flex-wrap items-center gap-4 text-sm sm:w-auto"
+              className="workspace-nav flex w-full flex-wrap items-center gap-1 text-sm sm:w-auto"
               aria-label="Dashboard"
             >
               {[
@@ -82,7 +83,13 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
                 <Link
                   key={href}
                   href={href}
-                  className="underline underline-offset-4"
+                  aria-current={
+                    pathname === href ||
+                    (href === "/dashboard/articles" &&
+                      pathname.startsWith(`${href}/`))
+                      ? "page"
+                      : undefined
+                  }
                 >
                   {label}
                 </Link>
@@ -97,7 +104,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
               {error}
             </p>
           )}
-          {children}
+          <main id="main-content">{children}</main>
         </UserContext.Provider>
       )}
     </Container>

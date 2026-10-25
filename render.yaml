@@ -1,0 +1,130 @@
+# Configuration only. Creating/syncing this Blueprint provisions PAID resources.
+# Do not apply until the operator approves cost and completes docs/deployment.md.
+previews:
+  generation: "off"
+projects:
+  - name: recallloop
+    environments:
+      - name: production
+        services:
+          - type: web
+            name: recallloop-web
+            runtime: node
+            region: oregon
+            plan: 0.5c-512mb
+            rootDir: recallloop-web
+            autoDeployTrigger: "off"
+            buildCommand: npm ci && npm run build
+            startCommand: npm start -- --hostname 0.0.0.0 --port $PORT
+            healthCheckPath: /
+            envVars:
+              - key: NODE_VERSION
+                value: 24.21.0
+              - key: API_INTERNAL_URL
+                fromService:
+                  name: recallloop-api
+                  type: web
+                  property: hostport
+          - type: web
+            name: recallloop-api
+            runtime: python
+            region: oregon
+            plan: 0.5c-512mb
+            rootDir: recallloop-api
+            autoDeployTrigger: "off"
+            buildCommand: pip install uv==0.12.7 && uv sync --frozen --no-dev
+            startCommand: uv run --no-sync uvicorn app.main:app --host 0.0.0.0 --port $PORT --no-access-log
+            healthCheckPath: /api/v1/health
+            envVars:
+              - key: PYTHON_VERSION
+                value: 3.12.12
+              - key: APP_ENV
+                value: production
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: recallloop-db
+                  property: connectionString
+              - key: JWT_SECRET_KEY
+                generateValue: true
+              - key: FRONTEND_ORIGIN
+                sync: false
+              - key: CORS_ORIGINS
+                sync: false
+              - key: AUTH_COOKIE_SECURE
+                value: "true"
+              - key: GEMINI_API_KEY
+                sync: false
+              - key: GEMMA_MODEL
+                value: gemma-4-26b-a4b-it
+              - key: CELERY_BROKER_URL
+                fromService:
+                  name: recallloop-broker
+                  type: keyvalue
+                  property: connectionString
+              - key: DB_POOL_SIZE
+                value: "5"
+              - key: DB_MAX_OVERFLOW
+                value: "5"
+          - type: worker
+            name: recallloop-worker
+            runtime: python
+            region: oregon
+            plan: 0.5c-512mb
+            rootDir: recallloop-api
+            autoDeployTrigger: "off"
+            buildCommand: pip install uv==0.12.7 && uv sync --frozen --no-dev
+            startCommand: uv run --no-sync celery -A app.workers.celery_app:celery_app worker --loglevel=warning --concurrency=1 --without-gossip --without-mingle
+            maxShutdownDelaySeconds: 150
+            envVars:
+              - key: PYTHON_VERSION
+                value: 3.12.12
+              - key: APP_ENV
+                value: production
+              - key: DATABASE_URL
+                fromDatabase:
+                  name: recallloop-db
+                  property: connectionString
+              - key: CELERY_BROKER_URL
+                fromService:
+                  name: recallloop-broker
+                  type: keyvalue
+                  property: connectionString
+              - key: JWT_SECRET_KEY
+                fromService:
+                  name: recallloop-api
+                  type: web
+                  envVarKey: JWT_SECRET_KEY
+              - key: FRONTEND_ORIGIN
+                fromService:
+                  name: recallloop-api
+                  type: web
+                  envVarKey: FRONTEND_ORIGIN
+              - key: CORS_ORIGINS
+                fromService:
+                  name: recallloop-api
+                  type: web
+                  envVarKey: CORS_ORIGINS
+              - key: AUTH_COOKIE_SECURE
+                value: "true"
+              - key: GEMINI_API_KEY
+                fromService:
+                  name: recallloop-api
+                  type: web
+                  envVarKey: GEMINI_API_KEY
+              - key: GEMMA_MODEL
+                value: gemma-4-26b-a4b-it
+          - type: keyvalue
+            name: recallloop-broker
+            region: oregon
+            plan: 256mb
+            maxmemoryPolicy: noeviction
+            persistenceMode: journal-snapshot
+            ipAllowList: []
+        databases:
+          - name: recallloop-db
+            region: oregon
+            plan: 0.1c-256mb
+            postgresMajorVersion: "16"
+            databaseName: recallloop
+            user: recallloop
+            ipAllowList: []

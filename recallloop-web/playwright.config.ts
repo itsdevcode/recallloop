@@ -94,7 +94,8 @@ export default defineConfig({
     {
       command: "npm start -- --hostname 127.0.0.1 --port 13000",
       url: "http://127.0.0.1:13000",
-      env: { API_INTERNAL_URL: "http://127.0.0.1:18000" },
+      // Exercise the same scheme-less hostport format used by Render references.
+      env: { API_INTERNAL_URL: "127.0.0.1:18000" },
       reuseExistingServer: false,
     },
   ],

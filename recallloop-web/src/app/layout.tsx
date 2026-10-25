@@ -2,15 +2,22 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RecallLoop — Save it. Learn it. Remember it.",
+  title: "RecallLoop — Give your reading a second life.",
   description:
-    "Turn saved articles into personalized recall cards and remember what matters.",
+    "Turn saved articles into lasting knowledge with Gemma-powered recall and spaced repetition.",
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default function RootLayout({
+  children,
+}: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <a href="#main-content" className="skip-link">
+          Skip to content
+        </a>
+        {children}
+      </body>
     </html>
   );
 }
